@@ -1,10 +1,10 @@
 # momus
 
-Multi-phase AI pull-request review as a GitHub Action.
+Thorough AI code review as a GitHub Action.
 
-Provider-agnostic: works with any OpenAI-compatible LLM (OpenRouter,
-Anthropic, OpenAI, Bedrock, ...) configured at the deployment layer.
-The bot itself never names a provider.
+Provider-agnostic: works with any OpenAI-compatible LLM (OpenRouter, Anthropic, OpenAI, Bedrock, ...). Highly customizable.
+
+> Momus (/ˈmoʊməs/): The ancient Greek personification of relentless scrutiny. He was ultimately banished from Mount Olympus for his pedantic criticism of trivial defects in the gods' creations rather than assessing their functional intent.
 
 ## Quick start
 
