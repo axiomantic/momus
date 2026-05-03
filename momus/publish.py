@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -41,21 +42,14 @@ def publish(
     inline_comments = build_inline_comments(findings_doc.get("findings", []), run_url, run_id)
     event = findings_doc.get("verdict", "COMMENT")
 
-    # GitHub rejects APPROVE under two conditions: (1) self-approval (token
-    # user == PR author), (2) bot tokens (e.g. github-actions[bot]) cannot
-    # approve unless the org explicitly allows it. Detect both proactively
-    # and downgrade to COMMENT, annotating the body so a human reader sees
-    # what happened. If we can't determine the token user, attempt as-is and
-    # surface any real error.
+    # GitHub rejects APPROVE in three cases: (1) self-approval (token user ==
+    # PR author), (2) Bot-typed tokens, (3) installation tokens lacking a
+    # user identity (the default GITHUB_TOKEN inside Actions). Detect all
+    # three and downgrade to COMMENT, annotating the body so a human reader
+    # sees what happened.
     if event == "APPROVE":
         reason = _approve_downgrade_reason(pr_meta.get("author"))
-        if reason is None and _get_token_user_info() is None:
-            print(
-                "momus: warning: could not determine GH token user; "
-                "skipping APPROVE downgrade check.",
-                file=sys.stderr,
-            )
-        elif reason is not None:
+        if reason is not None:
             event = "COMMENT"
             body = (
                 f"_Note: verdict was APPROVE but downgraded to COMMENT "
@@ -341,6 +335,12 @@ def _approve_downgrade_reason(pr_author: str | None) -> str | None:
     """Return a one-line reason if APPROVE should be downgraded; else None."""
     info = _get_token_user_info()
     if info is None:
+        # `gh api /user` returns 4xx for installation tokens (the default
+        # GITHUB_TOKEN inside Actions). Inside CI, treat that as a bot token
+        # that cannot approve. Outside CI, leave the verdict alone and let
+        # GitHub reject if applicable.
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            return "the GitHub Actions installation token cannot approve PRs"
         return None
     login = info.get("login", "")
     user_type = info.get("type", "")
