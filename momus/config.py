@@ -43,11 +43,26 @@ class VerifyConfig:
 
 
 @dataclass
+class ChecksConfig:
+    """
+    Optional Check Run posting alongside the Review object. When enabled,
+    Momus posts a check that surfaces on the PR header (and can be made a
+    required check via branch protection). Requires the bot's token to
+    have ``Checks: Write`` — set on the GitHub App, or available by
+    default on ``GITHUB_TOKEN`` inside Actions.
+    """
+
+    enabled: bool
+    name: str
+
+
+@dataclass
 class Config:
     review: ReviewConfig
     conventions: ConventionsConfig
     post: PostConfig
     verify: VerifyConfig
+    checks: ChecksConfig
 
 
 def load_config(repo_root: Path) -> Config:
@@ -85,6 +100,7 @@ def _to_config(data: dict[str, Any]) -> Config:
     conventions = data.get("conventions", {})
     post = data.get("post", {})
     verify = data.get("verify", {})
+    checks = data.get("checks", {})
 
     blocking = list(review.get("blocking_severities", []))
     bad = [s for s in blocking if s not in ALLOWED_SEVERITIES]
@@ -122,5 +138,9 @@ def _to_config(data: dict[str, Any]) -> Config:
         ),
         verify=VerifyConfig(
             enabled=bool(verify.get("enabled", True)),
+        ),
+        checks=ChecksConfig(
+            enabled=bool(checks.get("enabled", False)),
+            name=str(checks.get("name", "Momus Code Review")),
         ),
     )

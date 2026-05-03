@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .checks import post_check_run
 from .config import Config, load_config
 from .fetch_priors import fetch_prior_threads
 from .hunks import parse_unified_diff
@@ -185,6 +186,15 @@ def _run(
         **status_kwargs,
     )
     publish(findings_doc, prior_findings, pr_meta, config, run_url)
+    post_check_run(
+        owner=pr_meta["owner"],
+        repo=pr_meta["repo"],
+        head_sha=pr_meta["head_sha"],
+        findings_doc=findings_doc,
+        blocking_severities=config.review.blocking_severities,
+        config=config.checks,
+        run_url=run_url,
+    )
     n_findings = len(findings_doc.get("findings") or [])
     summary = f"verdict {verdict}, {n_findings} finding{'s' if n_findings != 1 else ''}"
     post_status(

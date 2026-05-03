@@ -68,3 +68,17 @@ verify:
   # Whether to run phase 3 (verify gate). When true, phase 3 audits
   # phase 2's findings before posting; can rewrite or drop findings.
   enabled: true
+
+checks:
+  # Whether to also post a Check Run (GitHub's "Checks" UI on the PR
+  # header) alongside the Review object. Useful when you want Momus to
+  # be a required check via branch protection. Requires the bot's token
+  # to have `Checks: Write` (set on the GitHub App, or available by
+  # default on GITHUB_TOKEN). Disabled by default — opt in once your
+  # App is configured for it.
+  enabled: false
+
+  # Display name for the Check Run. Shows up on the PR's header checks
+  # list alongside CI ("Momus Code Review / passed"), so the qualifier
+  # disambiguates it from build/test/lint checks. Override per repo.
+  name: Momus Code Review

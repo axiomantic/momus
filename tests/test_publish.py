@@ -9,6 +9,7 @@ import tripwire
 
 from momus import publish as publish_mod
 from momus.config import (
+    ChecksConfig,
     Config,
     ConventionsConfig,
     PostConfig,
@@ -34,6 +35,7 @@ def _minimal_config() -> Config:
             allow_human_approve_override=False,
         ),
         verify=VerifyConfig(enabled=True),
+        checks=ChecksConfig(enabled=False, name="Momus Code Review"),
     )
 
 

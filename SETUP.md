@@ -58,6 +58,8 @@ GitHub App** and configure:
   - Contents: **Read**
   - Issues: **Read & write**
   - Pull requests: **Read & write**
+  - Actions: **Read**
+  - Checks: **Write** (only if you plan to enable Check Runs — see below)
   - Metadata: **Read** (default)
 - **Where can this App be installed?**: Only this account (or Any account,
   if you want to share it publicly)
@@ -163,7 +165,28 @@ review:
   noteworthy_max: 5
 verify:
   enabled: true
+checks:
+  enabled: true   # post a Check Run alongside the Review (see below)
+  name: Momus Code Review
 ```
+
+## Check Runs (optional)
+
+Setting `checks.enabled: true` makes Momus also post a Check Run that
+appears on the PR header alongside CI checks. Verdict mapping:
+
+| Bot result | Check conclusion |
+|---|---|
+| APPROVE, no blocking findings | success |
+| COMMENT, no blocking findings | neutral |
+| Any blocking finding | failure |
+| REQUEST_CHANGES verdict | failure |
+
+You can then use the Check in branch protection ("Require status checks
+to pass before merging" → pick `Momus`) so PRs with blocking findings
+can't merge. Requires `Checks: Write` on the App, which you set in
+step 2a above. Without that permission the post will fail (logged to
+stderr; Momus continues — Check Runs are best-effort).
 
 ---
 
