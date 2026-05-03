@@ -114,6 +114,8 @@ def render_review_body(
     parts.append("")
     parts.append(_commands_footer())
     parts.append("")
+    parts.append(_attribution_line())
+    parts.append("")
     parts.append(f"<!-- momus:run:{run_id} -->")
     parts.append(f"<!-- run: {run_url} -->")
     return "\n".join(parts)
@@ -145,10 +147,45 @@ def _finding_one_liner(f: dict[str, Any]) -> str:
     return f"- **{fid}** (`{file}:{line}`): {title}"
 
 
+def _attribution_line() -> str:
+    """
+    Footer line crediting the project and showing what model/host produced
+    the review. The model and host come from the env (set by the workflow).
+    The host is rendered as the bare hostname so the line stays readable.
+    """
+    model = os.environ.get("LLM_MODEL", "").strip()
+    host = _hostname_from_url(os.environ.get("LLM_BASE_URL", ""))
+    base = "_Powered by [Momus](https://github.com/axiomantic/momus)"
+    if model and host:
+        return f"{base} running `{model}` via {host}._"
+    if model:
+        return f"{base} running `{model}`._"
+    return base + "._"
+
+
+def _hostname_from_url(url: str) -> str:
+    """Strip scheme and path from a URL, returning just the hostname."""
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        return parsed.hostname or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _commands_footer() -> str:
+    trigger = os.environ.get("MOMUS_TRIGGER_COMMAND", "").strip() or "/ai-review"
+    mention = os.environ.get("MOMUS_TRIGGER_MENTION", "").strip()
+    trigger_line = f"- Comment `{trigger}`"
+    if mention:
+        trigger_line += f" or mention {mention}"
+    trigger_line += " to request a re-review of the latest changes."
     return (
         "<details><summary>Commands</summary>\n\n"
-        "- Comment `/ai-review` to request a re-review of the latest changes.\n"
+        f"{trigger_line}\n"
         "- Reply to a finding with `won't fix`, `by design`, or `not a bug` to decline it.\n"
         "- Reply with `instead, ...` to propose an alternative fix.\n\n"
         "</details>"

@@ -405,3 +405,64 @@ def _expected_rendered_body(
     assert exact equality against payloads instead of substring matches."""
     cfg = config if config is not None else _minimal_config()
     return publish_mod.render_review_body(findings, run_url, run_id, cfg)
+
+
+# --- Attribution + commands footer ------------------------------------------
+
+
+def test_attribution_includes_model_and_host(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "deepseek/deepseek-v4-pro")
+    monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    line = publish_mod._attribution_line()
+    assert "[Momus](https://github.com/axiomantic/momus)" in line
+    assert "`deepseek/deepseek-v4-pro`" in line
+    assert "openrouter.ai" in line
+    # The path component must be stripped — show only the host.
+    assert "/api/v1" not in line
+
+
+def test_attribution_with_model_only(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-4-6")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    line = publish_mod._attribution_line()
+    assert "`claude-sonnet-4-6`" in line
+    assert "via" not in line
+
+
+def test_attribution_with_neither(monkeypatch):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    line = publish_mod._attribution_line()
+    assert "[Momus](https://github.com/axiomantic/momus)" in line
+    # No "running ..." clause when there's nothing to show.
+    assert "running" not in line
+
+
+def test_commands_footer_default_trigger(monkeypatch):
+    monkeypatch.delenv("MOMUS_TRIGGER_COMMAND", raising=False)
+    monkeypatch.delenv("MOMUS_TRIGGER_MENTION", raising=False)
+    footer = publish_mod._commands_footer()
+    assert "`/ai-review`" in footer
+
+
+def test_commands_footer_custom_trigger(monkeypatch):
+    monkeypatch.setenv("MOMUS_TRIGGER_COMMAND", "/momus")
+    monkeypatch.setenv("MOMUS_TRIGGER_MENTION", "@axiomantic-momus[bot]")
+    footer = publish_mod._commands_footer()
+    assert "`/momus`" in footer
+    assert "@axiomantic-momus[bot]" in footer
+    # The literal default must not leak through.
+    assert "/ai-review" not in footer
+
+
+def test_review_body_contains_attribution(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "deepseek/deepseek-v4-pro")
+    monkeypatch.setenv("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+    )
+    assert "Powered by [Momus]" in body
+    assert "deepseek/deepseek-v4-pro" in body
