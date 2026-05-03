@@ -6,7 +6,13 @@ Provider-agnostic: works with any OpenAI-compatible LLM (OpenRouter,
 Anthropic, OpenAI, Bedrock, ...) configured at the deployment layer.
 The bot itself never names a provider.
 
-Status: under construction. Pilot on `elijahr/lockfreequeues` PR #25.
+## Quick start
+
+See **[SETUP.md](SETUP.md)** for the full installation walkthrough,
+including the recommended GitHub App configuration that lets the bot post
+real APPROVE reviews (without it, APPROVE downgrades to COMMENT).
+
+Status: under construction. Pilot on `elijahr/lockfreequeues`.
 
 ## Phases
 
@@ -59,6 +65,10 @@ provider-specific env vars.
 ## Triggers
 
 - `pull_request` opened / synchronize / reopened — full review
-- `issue_comment` body starting with `/ai-review` — re-review with
-  prior-findings continuity
+- `issue_comment` body starting with the configured trigger command
+  (default `/ai-review`) OR containing the configured @-mention (e.g.
+  `@your-org-momus[bot]`) — re-review with prior-findings continuity
 - `workflow_dispatch` — manual run
+
+Both `trigger_command` and `trigger_mention` are inputs on the reusable
+workflow; see [SETUP.md](SETUP.md#3-add-the-workflow).
