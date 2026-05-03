@@ -21,17 +21,93 @@ your bot can actually approve clean PRs.
 
 ## 1. Add the LLM provider secret
 
-Go to **Settings → Secrets and variables → Actions** in your repo (or org)
-and add:
+Momus speaks the OpenAI Chat Completions wire format, so any provider
+that exposes that format works. Pick one below. Whichever you choose,
+the API key goes into a single repo (or org) secret named `LLM_API_KEY`.
 
-| Secret | Value |
-|---|---|
-| `LLM_API_KEY` | API key for any OpenAI-compatible provider (OpenRouter, Anthropic via OpenRouter, OpenAI, Bedrock proxy, etc.) |
+Add the secret at **Settings → Secrets and variables → Actions →
+New repository secret** (or the same path under org settings).
 
-You can override the default model and base URL per repo via the workflow's
-`with: model:` / `with: base_url:` inputs (see step 3). The defaults point
-at OpenRouter's endpoint and DeepSeek V4 Pro, so an OpenRouter key is the
-zero-config path.
+The model and base URL are configured per-repo via either the workflow
+inputs (step 3) or `.momus.yaml` (see "Customizing per repo" below).
+Workflow defaults: **OpenRouter** + **DeepSeek V4 Pro**.
+
+### OpenRouter (recommended; default)
+
+One key gets you every major model — Claude, Gemini, GPT-4, DeepSeek,
+Llama, etc. Cheapest path for trying different models without juggling
+keys, and what the workflow defaults to.
+
+- **Get a key**: https://openrouter.ai/settings/keys
+- **Base URL**: `https://openrouter.ai/api/v1`
+- **Suggested models**:
+  - `deepseek/deepseek-v4-pro` (default — strong code review at low cost)
+  - `anthropic/claude-sonnet-4-6` (high quality, more expensive)
+  - `openai/gpt-4o`
+  - `google/gemini-2.0-flash` (cheapest)
+- **Workflow override**: leave defaults, just drop the key
+
+### Anthropic Claude (direct)
+
+If you have an Anthropic account and want direct billing.
+
+- **Get a key**: https://console.anthropic.com/settings/keys
+- **Base URL**: `https://api.anthropic.com/v1`
+- **Suggested models**: `claude-sonnet-4-6`, `claude-opus-4-7`,
+  `claude-haiku-4-5-20251001`
+- **Workflow override**:
+  ```yaml
+  with:
+    model: claude-sonnet-4-6
+    base_url: https://api.anthropic.com/v1
+  ```
+
+### OpenAI (also covers Codex)
+
+If you have an OpenAI account.
+
+- **Get a key**: https://platform.openai.com/api-keys
+- **Base URL**: `https://api.openai.com/v1`
+- **Suggested models**: `gpt-4o`, `gpt-4-turbo`, `o1`, `o3-mini`
+- **Workflow override**:
+  ```yaml
+  with:
+    model: gpt-4o
+    base_url: https://api.openai.com/v1
+  ```
+
+### Google Gemini
+
+- **Get a key**: https://aistudio.google.com/app/apikey
+- **Base URL**: `https://generativelanguage.googleapis.com/v1beta/openai/`
+- **Suggested models**: `gemini-2.0-flash`, `gemini-2.5-pro`
+- **Workflow override**:
+  ```yaml
+  with:
+    model: gemini-2.0-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+  ```
+
+### DeepSeek (direct)
+
+If you want DeepSeek without going through OpenRouter.
+
+- **Get a key**: https://platform.deepseek.com/api_keys
+- **Base URL**: `https://api.deepseek.com/v1`
+- **Suggested models**: `deepseek-chat`, `deepseek-reasoner`
+- **Workflow override**:
+  ```yaml
+  with:
+    model: deepseek-reasoner
+    base_url: https://api.deepseek.com/v1
+  ```
+
+### Other OpenAI-compatible providers
+
+Together, Groq, Mistral La Plateforme, Bedrock-via-LiteLLM, and most
+inference proxies expose an OpenAI-compatible endpoint. Set
+`base_url` to their `/v1` URL and use whatever model slugs they
+publish.
 
 ---
 
