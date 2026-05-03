@@ -76,11 +76,12 @@ def test_self_pr_approve_downgrades_to_comment_with_note():
     findings = _findings_doc(verdict="APPROVE")
 
     with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_login", return_value="elijahr"
-    ) as mock_login:
+        publish_mod, "_get_token_user_info",
+        return_value={"login": "elijahr", "type": "User"},
+    ) as mock_user:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert mock_login.call_count == 1
+    assert mock_user.call_count >= 1
     assert mock_api.call_count == 1
     method, endpoint, payload = _captured_payload(mock_api)
     assert method == "POST"
@@ -102,7 +103,8 @@ def test_non_self_pr_approve_stays_approve_unchanged_body():
     findings = _findings_doc(verdict="APPROVE")
 
     with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_login", return_value="bot-account"
+        publish_mod, "_get_token_user_info",
+        return_value={"login": "bot-account", "type": "User"},
     ):
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -112,14 +114,34 @@ def test_non_self_pr_approve_stays_approve_unchanged_body():
     assert "downgraded to COMMENT" not in payload["body"]
 
 
+def test_bot_token_approve_downgrades_to_comment():
+    """A Bot-type token (e.g. github-actions[bot]) cannot approve PRs by default,
+    even when its login differs from the PR author. Downgrade preemptively."""
+    cfg = _minimal_config()
+    pr_meta = _pr_meta(author="some-human")
+    findings = _findings_doc(verdict="APPROVE")
+
+    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
+        publish_mod, "_get_token_user_info",
+        return_value={"login": "github-actions[bot]", "type": "Bot"},
+    ):
+        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+
+    assert mock_api.call_count == 1
+    _method, _endpoint, payload = _captured_payload(mock_api)
+    assert payload["event"] == "COMMENT"
+    assert "github-actions[bot]" in payload["body"]
+    assert "Bot" in payload["body"]
+
+
 def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
-    """If we can't determine the token login, do NOT downgrade. Warn to stderr."""
+    """If we can't determine the token user, do NOT downgrade. Warn to stderr."""
     cfg = _minimal_config()
     pr_meta = _pr_meta(author="elijahr")
     findings = _findings_doc(verdict="APPROVE")
 
     with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_login", return_value=None
+        publish_mod, "_get_token_user_info", return_value=None
     ):
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -130,8 +152,8 @@ def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
     captured = capsys.readouterr()
     assert (
         captured.err.strip()
-        == "momus: warning: could not determine GH token login; "
-        "skipping self-PR check."
+        == "momus: warning: could not determine GH token user; "
+        "skipping APPROVE downgrade check."
     )
 
 
@@ -230,7 +252,8 @@ def test_self_pr_check_is_case_insensitive():
     findings = _findings_doc(verdict="APPROVE")
 
     with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_login", return_value="elijahr"
+        publish_mod, "_get_token_user_info",
+        return_value={"login": "elijahr", "type": "User"},
     ):
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 

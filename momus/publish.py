@@ -41,25 +41,25 @@ def publish(
     inline_comments = build_inline_comments(findings_doc.get("findings", []), run_url, run_id)
     event = findings_doc.get("verdict", "COMMENT")
 
-    # GitHub rejects self-approval with HTTP 422. When the bot's token user is
-    # the PR author, downgrade APPROVE to COMMENT and annotate the body so a
-    # human reader can see what happened. If we can't determine the token
-    # login, leave the event alone and warn — better to attempt and surface a
-    # real error than silently mis-route.
+    # GitHub rejects APPROVE under two conditions: (1) self-approval (token
+    # user == PR author), (2) bot tokens (e.g. github-actions[bot]) cannot
+    # approve unless the org explicitly allows it. Detect both proactively
+    # and downgrade to COMMENT, annotating the body so a human reader sees
+    # what happened. If we can't determine the token user, attempt as-is and
+    # surface any real error.
     if event == "APPROVE":
-        token_login = _get_token_login()
-        author = pr_meta.get("author")
-        if token_login is None:
+        reason = _approve_downgrade_reason(pr_meta.get("author"))
+        if reason is None and _get_token_user_info() is None:
             print(
-                "momus: warning: could not determine GH token login; "
-                "skipping self-PR check.",
+                "momus: warning: could not determine GH token user; "
+                "skipping APPROVE downgrade check.",
                 file=sys.stderr,
             )
-        elif isinstance(author, str) and token_login.lower() == author.lower():
+        elif reason is not None:
             event = "COMMENT"
             body = (
-                "_Note: verdict was APPROVE but downgraded to COMMENT because "
-                "the bot account is the PR author._\n\n"
+                f"_Note: verdict was APPROVE but downgraded to COMMENT "
+                f"because {reason}._\n\n"
             ) + body
 
     _submit_review(
@@ -311,19 +311,44 @@ def _resolve_thread(thread_id: str) -> None:
 
 def _get_token_login() -> str | None:
     """Return the GH token's user login, or None if it can't be determined."""
+    info = _get_token_user_info()
+    if info is None:
+        return None
+    login = info.get("login", "")
+    return login or None
+
+
+def _get_token_user_info() -> dict[str, Any] | None:
+    """Return the GH token user object (login + type), or None on failure."""
     try:
         proc = subprocess.run(
-            ["gh", "api", "/user", "--jq", ".login"],
+            ["gh", "api", "/user"],
             capture_output=True,
             text=True,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if proc.returncode != 0:
+    if proc.returncode != 0 or not proc.stdout.strip():
         return None
-    login = proc.stdout.strip()
-    return login or None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _approve_downgrade_reason(pr_author: str | None) -> str | None:
+    """Return a one-line reason if APPROVE should be downgraded; else None."""
+    info = _get_token_user_info()
+    if info is None:
+        return None
+    login = info.get("login", "")
+    user_type = info.get("type", "")
+    if user_type == "Bot":
+        return f"the token user `{login}` is a Bot and cannot approve PRs"
+    if isinstance(pr_author, str) and login.lower() == pr_author.lower():
+        return "the bot account is the PR author"
+    return None
 
 
 def _is_self_approval_error(message: str) -> bool:
