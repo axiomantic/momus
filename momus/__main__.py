@@ -18,11 +18,35 @@ from .invoke_pi import invoke_pi_phase_with_retry
 from .preflight import preflight
 from .prep import prep_inputs
 from .publish import publish
+from .status import post_status
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+    run_url = os.environ.get("GITHUB_RUN_URL", _guess_run_url())
+    status_kwargs = {
+        "owner": args.owner,
+        "repo": args.repo,
+        "pr_number": args.pr_number,
+        "run_url": run_url,
+    }
+    post_status(state="starting", detail="setting up", **status_kwargs)
+    try:
+        return _run(args, run_url, status_kwargs)
+    except Exception as exc:  # noqa: BLE001 — surface ANY failure to the PR
+        # Truncate so the comment doesn't blow out with a megabyte traceback.
+        msg = str(exc).splitlines()[0] if str(exc).strip() else type(exc).__name__
+        if len(msg) > 240:
+            msg = msg[:237] + "..."
+        post_status(state="failed", detail=msg, **status_kwargs)
+        raise
 
+
+def _run(
+    args: argparse.Namespace,
+    run_url: str,
+    status_kwargs: dict[str, Any],
+) -> int:
     repo_root = Path(args.repo_root).resolve()
     work_dir = Path(args.work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -30,7 +54,6 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(repo_root)
 
     pr_meta = _build_pr_meta(args)
-    run_url = os.environ.get("GITHUB_RUN_URL", _guess_run_url())
 
     # Phase 0a: prior-thread fetch (only if there might be priors).
     is_re_review = args.event in ("issue_comment", "workflow_dispatch") or args.force_re_review
@@ -60,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     # Phase 1 — classify priors (skip if no prior threads)
     if prior_threads:
         _log(f"Phase 1: classifying {len(prior_threads)} prior threads")
+        post_status(
+            state="running",
+            detail=f"phase 1/3 — classifying {len(prior_threads)} prior threads",
+            **status_kwargs,
+        )
         invoke_pi_phase_with_retry("phase1", work_dir)
         prior_findings = _read_outputs_json(outputs_dir / "prior-findings.json", default=[])
     else:
@@ -68,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Phase 2 — review
     _log("Phase 2: review")
+    post_status(state="running", detail="phase 2/3 — reviewing diff", **status_kwargs)
     invoke_pi_phase_with_retry("phase2", work_dir)
     findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
@@ -88,12 +117,22 @@ def main(argv: list[str] | None = None) -> int:
     # Phase 3 — verify (optional)
     if config.verify.enabled:
         _log("Phase 3: verify gate")
+        post_status(
+            state="running",
+            detail="phase 3/3 — verifying findings",
+            **status_kwargs,
+        )
         invoke_pi_phase_with_retry("phase3", work_dir)
         findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
     # Publish.
-    _log(f"Publishing review (verdict={findings_doc.get('verdict')})")
+    verdict = findings_doc.get("verdict") or "COMMENT"
+    _log(f"Publishing review (verdict={verdict})")
+    post_status(state="posting", detail=f"verdict {verdict}", **status_kwargs)
     publish(findings_doc, prior_findings, pr_meta, config, run_url)
+    n_findings = len(findings_doc.get("findings") or [])
+    summary = f"verdict {verdict}, {n_findings} finding{'s' if n_findings != 1 else ''}"
+    post_status(state="done", detail=summary, **status_kwargs)
     return 0
 
 
