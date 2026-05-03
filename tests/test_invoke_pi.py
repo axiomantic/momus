@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
+import tripwire
 
 from momus import invoke_pi as invoke_pi_mod
 from momus.invoke_pi import (
@@ -39,16 +39,19 @@ def _fake_pi_factory(
     returncode: int = 0,
 ):
     """
-    Build a side_effect for subprocess.run that simulates pi.
+    Build a `.calls()` side-effect for subprocess.run that simulates pi.
 
     ``write_on_calls`` is the set of 1-based call indices on which the fake
-    pi will materialize the expected output file before returning.
+    pi will materialize the expected output file before returning. Each call
+    is recorded into ``captured`` so tests can later assert exact cmd shape.
     """
     state = {"calls": 0}
+    captured: list[tuple[tuple, dict]] = []
 
     def side_effect(*args, **kwargs):
         state["calls"] += 1
         call_idx = state["calls"]
+        captured.append((args, kwargs))
         if expected_rel_path is not None and call_idx in write_on_calls:
             target = work_dir / expected_rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -60,7 +63,7 @@ def _fake_pi_factory(
             stderr="",
         )
 
-    return side_effect, state
+    return side_effect, state, captured
 
 
 @pytest.fixture(autouse=True)
@@ -74,18 +77,26 @@ def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir = _setup_work_dir(tmp_path, phase)
-    side_effect, state = _fake_pi_factory(work_dir, expected_rel, write_on_calls={1})
+    side_effect, state, captured = _fake_pi_factory(
+        work_dir, expected_rel, write_on_calls={1}
+    )
 
-    with patch.object(invoke_pi_mod.subprocess, "run", side_effect=side_effect) as run_mock:
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock.calls(side_effect)
+
+    with tripwire:
         events = invoke_pi_phase_with_retry(phase, work_dir)
 
     assert events == [_EVENT_PARSED]
     assert state["calls"] == 1
-    assert run_mock.call_count == 1
+    assert len(captured) == 1
     # File exists, single call, prompt did NOT include the reminder.
-    first_call_cmd = run_mock.call_args_list[0].args[0]
+    first_call_cmd = captured[0][0][0]
     prompt_idx = first_call_cmd.index("-p") + 1
     assert first_call_cmd[prompt_idx] == "stub prompt"
+
+    args, kwargs = captured[0]
+    run_mock.assert_call(args=args, kwargs=kwargs)
 
 
 def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
@@ -93,18 +104,23 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir = _setup_work_dir(tmp_path, phase)
     # Only the second call writes the file.
-    side_effect, state = _fake_pi_factory(work_dir, expected_rel, write_on_calls={2})
+    side_effect, state, captured = _fake_pi_factory(
+        work_dir, expected_rel, write_on_calls={2}
+    )
 
-    with patch.object(invoke_pi_mod.subprocess, "run", side_effect=side_effect) as run_mock:
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire:
         events = invoke_pi_phase_with_retry(phase, work_dir)
 
     # Returned events come from the second (successful) call.
     assert events == [_EVENT_PARSED]
     assert state["calls"] == 2
-    assert run_mock.call_count == 2
+    assert len(captured) == 2
 
-    first_cmd = run_mock.call_args_list[0].args[0]
-    second_cmd = run_mock.call_args_list[1].args[0]
+    first_cmd = captured[0][0][0]
+    second_cmd = captured[1][0][0]
     first_prompt = first_cmd[first_cmd.index("-p") + 1]
     second_prompt = second_cmd[second_cmd.index("-p") + 1]
 
@@ -118,44 +134,61 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     )
     assert second_prompt == "stub prompt" + expected_suffix
 
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
 
 def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir = _setup_work_dir(tmp_path, phase)
     # Neither call writes the file.
-    side_effect, state = _fake_pi_factory(work_dir, expected_rel, write_on_calls=set())
+    side_effect, state, captured = _fake_pi_factory(
+        work_dir, expected_rel, write_on_calls=set()
+    )
 
-    with patch.object(invoke_pi_mod.subprocess, "run", side_effect=side_effect) as run_mock:
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire:
         with pytest.raises(PiInvocationError) as exc_info:
             invoke_pi_phase_with_retry(phase, work_dir)
 
     assert state["calls"] == 2
-    assert run_mock.call_count == 2
+    assert len(captured) == 2
     msg = str(exc_info.value)
     assert msg == (
         f"phase {phase} did not produce expected output {expected_rel} "
         "after retry"
     )
 
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
 
 def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir = _setup_work_dir(tmp_path, phase)
-    side_effect, state = _fake_pi_factory(
+    side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel, write_on_calls=set(), returncode=2
     )
 
-    with patch.object(invoke_pi_mod.subprocess, "run", side_effect=side_effect) as run_mock:
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock.calls(side_effect)
+
+    with tripwire:
         with pytest.raises(PiInvocationError) as exc_info:
             invoke_pi_phase_with_retry(phase, work_dir)
 
     # Pre-existing behavior: non-zero exit raises immediately, no retry.
     assert state["calls"] == 1
-    assert run_mock.call_count == 1
+    assert len(captured) == 1
     msg = str(exc_info.value)
     assert f"phase {phase} failed with exit 2" in msg
+
+    args, kwargs = captured[0]
+    run_mock.assert_call(args=args, kwargs=kwargs)
 
 
 def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
@@ -163,16 +196,22 @@ def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
     phase = "phase2"
     work_dir = _setup_work_dir(tmp_path, phase)
     # No file is ever written, but the unguarded function just returns events.
-    side_effect, state = _fake_pi_factory(
+    side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel_path=None, write_on_calls=set()
     )
 
-    with patch.object(invoke_pi_mod.subprocess, "run", side_effect=side_effect) as run_mock:
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock.calls(side_effect)
+
+    with tripwire:
         events = invoke_pi_phase(phase, work_dir)
 
     assert events == [_EVENT_PARSED]
     assert state["calls"] == 1
-    assert run_mock.call_count == 1
+    assert len(captured) == 1
+
+    args, kwargs = captured[0]
+    run_mock.assert_call(args=args, kwargs=kwargs)
 
 
 def test_phase_expected_outputs_mapping_is_exactly_three_phases() -> None:

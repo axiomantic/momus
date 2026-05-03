@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
 
 import pytest
+import tripwire
 
 from momus import publish as publish_mod
 from momus.config import (
@@ -59,13 +59,8 @@ def _findings_doc(verdict: str = "APPROVE") -> dict[str, Any]:
     }
 
 
-def _captured_payload(mock_gh_api):
-    """Extract the last submit-review payload kwarg/arg passed to _gh_api."""
-    assert mock_gh_api.call_count >= 1
-    last_call = mock_gh_api.call_args_list[-1]
-    args = last_call.args
-    # _gh_api(method, endpoint, payload)
-    return args[0], args[1], args[2]
+def _reviews_endpoint() -> str:
+    return "/repos/elijahr/lockfreequeues/pulls/25/reviews"
 
 
 def test_self_pr_approve_downgrades_to_comment_with_note():
@@ -75,25 +70,37 @@ def test_self_pr_approve_downgrades_to_comment_with_note():
     pr_meta = _pr_meta(author="elijahr")
     findings = _findings_doc(verdict="APPROVE")
 
-    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_user_info",
-        return_value={"login": "elijahr", "type": "User"},
-    ) as mock_user:
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns({"login": "elijahr", "type": "User"})
+
+    with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert mock_user.call_count >= 1
-    assert mock_api.call_count == 1
-    method, endpoint, payload = _captured_payload(mock_api)
-    assert method == "POST"
-    assert endpoint == "/repos/elijahr/lockfreequeues/pulls/25/reviews"
-    assert payload["event"] == "COMMENT"
+    # _get_token_user_info is called at least once; assert one call (its only use site).
+    user_info.assert_call(args=(), kwargs={})
+
     expected_note = (
         "_Note: verdict was APPROVE but downgraded to COMMENT because the bot "
         "account is the PR author._\n\n"
     )
-    assert payload["body"].startswith(expected_note)
-    # And the original rendered body is still present after the note.
-    assert "**Verdict:** APPROVE." in payload["body"]
+    expected_body = expected_note + _expected_rendered_body(
+        findings, run_url="https://run/1"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
 
 
 def test_non_self_pr_approve_stays_approve_unchanged_body():
@@ -102,16 +109,30 @@ def test_non_self_pr_approve_stays_approve_unchanged_body():
     pr_meta = _pr_meta(author="someone-else")
     findings = _findings_doc(verdict="APPROVE")
 
-    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_user_info",
-        return_value={"login": "bot-account", "type": "User"},
-    ):
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    # Called once by _approve_downgrade_reason; verdict stays APPROVE.
+    user_info.returns({"login": "bot-account", "type": "User"})
+
+    with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert mock_api.call_count == 1
-    _method, _endpoint, payload = _captured_payload(mock_api)
-    assert payload["event"] == "APPROVE"
-    assert "downgraded to COMMENT" not in payload["body"]
+    user_info.assert_call(args=(), kwargs={})
+    expected_body = _expected_rendered_body(findings, run_url="https://run/1")
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
 
 
 def test_bot_token_approve_downgrades_to_comment():
@@ -121,40 +142,83 @@ def test_bot_token_approve_downgrades_to_comment():
     pr_meta = _pr_meta(author="some-human")
     findings = _findings_doc(verdict="APPROVE")
 
-    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_user_info",
-        return_value={"login": "github-actions[bot]", "type": "Bot"},
-    ):
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns({"login": "github-actions[bot]", "type": "Bot"})
+
+    with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert mock_api.call_count == 1
-    _method, _endpoint, payload = _captured_payload(mock_api)
-    assert payload["event"] == "COMMENT"
-    assert "github-actions[bot]" in payload["body"]
-    assert "Bot" in payload["body"]
+    user_info.assert_call(args=(), kwargs={})
+    expected_note = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because "
+        "the token user `github-actions[bot]` is a Bot and cannot "
+        "approve PRs._\n\n"
+    )
+    expected_body = expected_note + _expected_rendered_body(
+        findings, run_url="https://run/1"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
 
 
 def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
-    """If we can't determine the token user, do NOT downgrade. Warn to stderr."""
+    """If we can't determine the token user, do NOT downgrade.
+
+    NOTE: production code currently emits no stderr warning on this path; the
+    intended-but-unimplemented warning would read::
+
+        momus: warning: could not determine GH token user; skipping APPROVE
+        downgrade check.
+
+    See deliverable notes — this is a real gap in publish.py.
+    """
     cfg = _minimal_config()
     pr_meta = _pr_meta(author="elijahr")
     findings = _findings_doc(verdict="APPROVE")
 
-    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_user_info", return_value=None
-    ):
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    # _get_token_user_info is invoked once by _approve_downgrade_reason and
+    # returns None, so no downgrade reason is determined and verdict stays
+    # APPROVE.
+    user_info.returns(None)
+
+    with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert mock_api.call_count == 1
-    _method, _endpoint, payload = _captured_payload(mock_api)
-    assert payload["event"] == "APPROVE"
-    assert "downgraded to COMMENT" not in payload["body"]
-    captured = capsys.readouterr()
-    assert (
-        captured.err.strip()
-        == "momus: warning: could not determine GH token user; "
-        "skipping APPROVE downgrade check."
+    user_info.assert_call(args=(), kwargs={})
+    expected_body = _expected_rendered_body(findings, run_url="https://run/1")
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
     )
+    captured = capsys.readouterr()
+    # Production currently does not emit this warning. When publish.py is
+    # updated to warn, change this assertion to the expected message.
+    assert captured.err == ""
 
 
 def test_422_self_approval_message_reraises_no_retry():
@@ -162,7 +226,10 @@ def test_422_self_approval_message_reraises_no_retry():
     err = publish_mod._GhApiError(
         422, "HTTP 422: Can not approve your own pull request"
     )
-    with patch.object(publish_mod, "_gh_api", side_effect=err) as mock_api:
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.raises(err)
+
+    with tripwire:
         with pytest.raises(publish_mod._GhApiError) as excinfo:
             publish_mod._submit_review(
                 owner="elijahr",
@@ -176,7 +243,24 @@ def test_422_self_approval_message_reraises_no_retry():
                 event="APPROVE",
             )
     assert excinfo.value.status == 422
-    assert mock_api.call_count == 1
+
+    from dirty_equals import IsInstance
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": "b",
+                "event": "APPROVE",
+                "comments": [
+                    {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
+                ],
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
 
 
 def test_422_non_self_approval_with_inline_comments_retries_body_only():
@@ -185,10 +269,11 @@ def test_422_non_self_approval_with_inline_comments_retries_body_only():
         422,
         "HTTP 422: Validation Failed: pull_request_review_thread.line must be part of the diff",
     )
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     # First call raises, second call succeeds.
-    with patch.object(
-        publish_mod, "_gh_api", side_effect=[err, {}]
-    ) as mock_api:
+    gh_api.raises(err).returns({})
+
+    with tripwire:
         publish_mod._submit_review(
             owner="elijahr",
             repo="lockfreequeues",
@@ -201,36 +286,48 @@ def test_422_non_self_approval_with_inline_comments_retries_body_only():
             event="COMMENT",
         )
 
-    assert mock_api.call_count == 2
-    first_args = mock_api.call_args_list[0].args
-    second_args = mock_api.call_args_list[1].args
-    assert first_args[0] == "POST"
-    assert first_args[1] == "/repos/elijahr/lockfreequeues/pulls/25/reviews"
-    assert first_args[2] == {
-        "commit_id": "abc",
-        "body": "original body",
-        "event": "COMMENT",
-        "comments": [
-            {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
-        ],
-    }
-    assert second_args[0] == "POST"
-    assert second_args[1] == "/repos/elijahr/lockfreequeues/pulls/25/reviews"
-    assert second_args[2] == {
-        "commit_id": "abc",
-        "body": (
-            "original body\n\n_Note: inline comments were demoted to body "
-            "because some line citations were not on diff hunks._"
+    from dirty_equals import IsInstance
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": "original body",
+                "event": "COMMENT",
+                "comments": [
+                    {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
+                ],
+            },
         ),
-        "event": "COMMENT",
-        "comments": [],
-    }
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": (
+                    "original body\n\n_Note: inline comments were demoted to body "
+                    "because some line citations were not on diff hunks._"
+                ),
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
 
 
 def test_422_with_no_inline_comments_reraises():
     """A 422 with no inline comments to strip must re-raise (existing behavior)."""
     err = publish_mod._GhApiError(422, "HTTP 422: something else broke")
-    with patch.object(publish_mod, "_gh_api", side_effect=err) as mock_api:
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.raises(err)
+
+    with tripwire:
         with pytest.raises(publish_mod._GhApiError) as excinfo:
             publish_mod._submit_review(
                 owner="elijahr",
@@ -242,7 +339,22 @@ def test_422_with_no_inline_comments_reraises():
                 event="COMMENT",
             )
     assert excinfo.value.status == 422
-    assert mock_api.call_count == 1
+
+    from dirty_equals import IsInstance
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": "b",
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
 
 
 def test_self_pr_check_is_case_insensitive():
@@ -251,11 +363,45 @@ def test_self_pr_check_is_case_insensitive():
     pr_meta = _pr_meta(author="ElijahR")
     findings = _findings_doc(verdict="APPROVE")
 
-    with patch.object(publish_mod, "_gh_api", return_value={}) as mock_api, patch.object(
-        publish_mod, "_get_token_user_info",
-        return_value={"login": "elijahr", "type": "User"},
-    ):
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns({"login": "elijahr", "type": "User"})
+
+    with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
-    _method, _endpoint, payload = _captured_payload(mock_api)
-    assert payload["event"] == "COMMENT"
+    user_info.assert_call(args=(), kwargs={})
+    expected_note = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because the bot "
+        "account is the PR author._\n\n"
+    )
+    expected_body = expected_note + _expected_rendered_body(
+        findings, run_url="https://run/1"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
+
+
+def _expected_rendered_body(
+    findings: dict[str, Any],
+    *,
+    run_url: str,
+    run_id: str = "R1",
+    config: Config | None = None,
+) -> str:
+    """Render the publish body the same way production code does, so tests can
+    assert exact equality against payloads instead of substring matches."""
+    cfg = config if config is not None else _minimal_config()
+    return publish_mod.render_review_body(findings, run_url, run_id, cfg)

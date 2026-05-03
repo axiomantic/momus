@@ -17,5 +17,11 @@ momus = "momus.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["momus"]
 
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-tripwire[all]",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
