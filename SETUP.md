@@ -104,10 +104,10 @@ If you want DeepSeek without going through OpenRouter.
 
 ### Other OpenAI-compatible providers
 
-Together, Mistral La Plateforme, Bedrock-via-LiteLLM, and most
+Together, Groq, Mistral La Plateforme, Bedrock-via-LiteLLM, and most
 inference proxies expose an OpenAI-compatible endpoint. Set
 `base_url` to their `/v1` URL and use whatever model slugs they
-publish.
+publish. (xAI's Grok is intentionally not listed.)
 
 ---
 
