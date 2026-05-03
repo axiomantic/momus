@@ -32,6 +32,24 @@ def _setup_work_dir(tmp_path: Path, phase: str) -> Path:
     return work_dir
 
 
+class _FakePopen:
+    """Minimal Popen stand-in supporting context manager + line iteration."""
+
+    def __init__(self, returncode: int, stdout_text: str) -> None:
+        self.returncode = returncode
+        self.stdout = iter(stdout_text.splitlines(keepends=True))
+        self.stderr = iter([])
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def wait(self) -> int:
+        return self.returncode
+
+
 def _fake_pi_factory(
     work_dir: Path,
     expected_rel_path: str | None,
@@ -39,7 +57,7 @@ def _fake_pi_factory(
     returncode: int = 0,
 ):
     """
-    Build a `.calls()` side-effect for subprocess.run that simulates pi.
+    Build a `.calls()` side-effect for subprocess.Popen that simulates pi.
 
     ``write_on_calls`` is the set of 1-based call indices on which the fake
     pi will materialize the expected output file before returning. Each call
@@ -56,12 +74,7 @@ def _fake_pi_factory(
             target = work_dir / expected_rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("{}")
-        return subprocess.CompletedProcess(
-            args=args[0] if args else kwargs.get("args"),
-            returncode=returncode,
-            stdout=_EVENT_LINE + "\n",
-            stderr="",
-        )
+        return _FakePopen(returncode=returncode, stdout_text=_EVENT_LINE + "\n")
 
     return side_effect, state, captured
 
@@ -81,7 +94,7 @@ def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
         work_dir, expected_rel, write_on_calls={1}
     )
 
-    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
 
     with tripwire:
@@ -108,7 +121,7 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
         work_dir, expected_rel, write_on_calls={2}
     )
 
-    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect).calls(side_effect)
 
     with tripwire:
@@ -147,7 +160,7 @@ def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
         work_dir, expected_rel, write_on_calls=set()
     )
 
-    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect).calls(side_effect)
 
     with tripwire:
@@ -174,7 +187,7 @@ def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
         work_dir, expected_rel, write_on_calls=set(), returncode=2
     )
 
-    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
 
     with tripwire:
@@ -200,7 +213,7 @@ def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
         work_dir, expected_rel_path=None, write_on_calls=set()
     )
 
-    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "run")
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
 
     with tripwire:

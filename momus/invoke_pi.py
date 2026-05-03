@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
@@ -56,24 +58,95 @@ def invoke_pi_phase(
     cmd = _build_pi_command(prompt, tools)
 
     env = _build_pi_env()
-    proc = subprocess.run(
+
+    # Stream pi's output line-by-line so the orchestrator's stderr (and
+    # therefore the GitHub Actions log) shows progress in real time. Pi's
+    # stdout is a JSON-event stream; we parse each line AND echo a summary.
+    print(
+        f"[momus.pi] starting phase {phase} (tools={tools})",
+        file=sys.stderr,
+        flush=True,
+    )
+    start = time.monotonic()
+    events: list[dict] = []
+    stderr_tail: list[str] = []
+    with subprocess.Popen(
         cmd,
         cwd=work_dir,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         env=env,
-        check=False,
+        bufsize=1,
+    ) as proc:
+        # Drain stdout line-by-line. stderr is drained at the end (it is
+        # typically silent unless pi crashes). Reading stderr concurrently
+        # would require threads; the simpler approach is fine for our case
+        # because pi rarely fills its 64KB stderr pipe before exit.
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            event = _parse_one_line(line)
+            events.append(event)
+            _log_event(phase, event, line)
+        proc.wait()
+        # Now safe to read stderr (process exited).
+        if proc.stderr is not None:
+            stderr_tail = [ln.rstrip("\n") for ln in proc.stderr]
+            for ln in stderr_tail:
+                print(f"[momus.pi:err] {ln}", file=sys.stderr, flush=True)
+
+    elapsed = time.monotonic() - start
+    print(
+        f"[momus.pi] phase {phase} exited rc={proc.returncode} "
+        f"after {elapsed:.1f}s ({len(events)} events)",
+        file=sys.stderr,
+        flush=True,
     )
 
-    events = _parse_event_stream(proc.stdout)
     if proc.returncode != 0:
         last = events[-1] if events else {}
         raise PiInvocationError(
             f"phase {phase} failed with exit {proc.returncode}.\n"
             f"last event: {last}\n"
-            f"stderr: {proc.stderr.strip()}"
+            f"stderr: {chr(10).join(stderr_tail).strip()}"
         )
     return events
+
+
+def _parse_one_line(line: str) -> dict:
+    if not line.strip():
+        return {"type": "_blank"}
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return {"type": "_unparsed", "line": line}
+
+
+def _log_event(phase: str, event: dict, raw: str) -> None:
+    """Print a one-line human summary for each pi event to stderr."""
+    et = event.get("type", "?")
+    if et == "_blank":
+        return
+    if et == "_unparsed":
+        print(f"[momus.pi {phase}] (raw) {raw[:300]}", file=sys.stderr, flush=True)
+        return
+    # Best-effort summary: pull common fields if present, else show keys.
+    summary_bits: list[str] = [f"type={et}"]
+    for k in ("name", "tool", "phase", "model", "role", "status", "error"):
+        if k in event and event[k]:
+            v = str(event[k])
+            if len(v) > 80:
+                v = v[:77] + "..."
+            summary_bits.append(f"{k}={v}")
+    # If there's a text payload, show a snippet.
+    text = event.get("text") or event.get("delta") or event.get("content")
+    if isinstance(text, str) and text.strip():
+        snippet = text.strip().replace("\n", " ")
+        if len(snippet) > 200:
+            snippet = snippet[:197] + "..."
+        summary_bits.append(f'text="{snippet}"')
+    print(f"[momus.pi {phase}] " + " ".join(summary_bits), file=sys.stderr, flush=True)
 
 
 def invoke_pi_phase_with_retry(phase: str, work_dir: Path) -> list[dict]:
@@ -149,15 +222,3 @@ def _build_pi_env() -> dict[str, str]:
     return env
 
 
-def _parse_event_stream(stdout: str) -> list[dict]:
-    events: list[dict] = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            # pi may emit non-JSON lines on errors. Capture verbatim.
-            events.append({"type": "_unparsed", "line": line})
-    return events
