@@ -1,0 +1,324 @@
+/**
+ * pi extension: read-only shell + sandboxed file write.
+ *
+ * Registers two tools:
+ *
+ *   - bash_ro(cmd): run a shell command after validating it against an
+ *     allowlist of binary names and rejecting shell metacharacters that
+ *     enable redirection, chaining, or subshells. Spawns the binary
+ *     directly (no shell), so even if validation slipped, redirection
+ *     would not occur.
+ *
+ *   - write_output(path, content): write a file restricted to under
+ *     ./outputs/ relative to CWD. Refuses anything else.
+ *
+ * Load with: pi -p "..." -e ./extensions/readonly-tools.ts \
+ *              --tools read,grep,find,ls,bash_ro,write_output
+ *
+ * Built-in `bash`, `write`, `edit` are excluded by virtue of not being
+ * named in --tools.
+ */
+
+import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { Type } from "typebox";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+const ALLOWED_BINS = new Set([
+  "git",
+  "cat",
+  "head",
+  "tail",
+  "wc",
+  "find",
+  "rg",
+  "ls",
+  "grep",
+]);
+
+const OUTPUTS_DIR = "outputs";
+
+const MAX_OUTPUT_BYTES = 256 * 1024;
+const COMMAND_TIMEOUT_MS = 30_000;
+
+class RejectError extends Error {}
+
+function tokenize(cmd: string): string[] {
+  const tokens: string[] = [];
+  let cur = "";
+  let inQuote = false;
+  let quoteChar = "";
+
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+
+    if (inQuote) {
+      if (c === quoteChar) {
+        inQuote = false;
+        quoteChar = "";
+        continue;
+      }
+      if (c === "\\" && i + 1 < cmd.length) {
+        cur += cmd[++i];
+        continue;
+      }
+      cur += c;
+      continue;
+    }
+
+    if (c === "'" || c === '"') {
+      inQuote = true;
+      quoteChar = c;
+      continue;
+    }
+
+    if (c === " " || c === "\t") {
+      if (cur) {
+        tokens.push(cur);
+        cur = "";
+      }
+      continue;
+    }
+
+    if ("><|;&`$\n\r".includes(c)) {
+      throw new RejectError(`shell metacharacter not allowed: '${c}'`);
+    }
+
+    if (c === "\\" && i + 1 < cmd.length) {
+      cur += cmd[++i];
+      continue;
+    }
+
+    cur += c;
+  }
+
+  if (inQuote) {
+    throw new RejectError("unterminated quote");
+  }
+  if (cur) {
+    tokens.push(cur);
+  }
+  return tokens;
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max) + `\n... [truncated, ${s.length - max} bytes omitted]`;
+}
+
+export default function (pi: ExtensionAPI) {
+  // Register a "byo" (bring-your-own) provider pointing at any
+  // OpenAI-compatible endpoint (e.g. OpenRouter). pi's CLI does not expose
+  // --base-url; instead we register a named provider here and the CLI
+  // selects it via --provider byo.
+  //
+  // Required env vars (read by THIS extension at load time):
+  //   LLM_BASE_URL  — e.g. https://openrouter.ai/api/v1
+  //   LLM_MODEL     — model id, e.g. deepseek/deepseek-v4-pro
+  //   LLM_API_KEY   — passed as the env var NAME for pi to read
+  //                   (pi resolves the key from process.env at request time;
+  //                   the literal value never appears in argv).
+  const baseUrl = process.env.LLM_BASE_URL;
+  const model = process.env.LLM_MODEL;
+  if (!baseUrl || !model) {
+    throw new Error(
+      "readonly-tools extension: LLM_BASE_URL and LLM_MODEL must be set " +
+        "(LLM_API_KEY env var is read by pi at request time).",
+    );
+  }
+  if (!process.env.LLM_API_KEY) {
+    throw new Error(
+      "readonly-tools extension: LLM_API_KEY must be set; pi will read " +
+        "this env var to obtain the API key for the 'byo' provider.",
+    );
+  }
+  pi.registerProvider("byo", {
+    name: "BYO (OpenAI-compatible)",
+    baseUrl,
+    apiKey: "LLM_API_KEY",
+    api: "openai-completions",
+    models: [
+      {
+        id: model,
+        name: model,
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8192,
+      },
+    ],
+  });
+
+  pi.registerTool({
+    name: "bash_ro",
+    label: "bash (read-only)",
+    description:
+      "Run a read-only shell command. The first token must be one of: " +
+      [...ALLOWED_BINS].join(", ") +
+      ". Shell metacharacters (>, >>, <, |, ;, &, $(), backticks) are rejected; " +
+      "use multiple separate calls instead of chaining. " +
+      "Useful for `git log`, `git blame`, `git show`, `find` with complex predicates, etc.",
+    parameters: Type.Object({
+      cmd: Type.String({
+        description:
+          "Single command line; first token must be an allowed binary.",
+      }),
+    }),
+    async execute(_id, params, signal) {
+      const cmd = params.cmd.trim();
+      let argv: string[];
+      try {
+        argv = tokenize(cmd);
+      } catch (e) {
+        if (e instanceof RejectError) {
+          return {
+            content: [{ type: "text", text: `rejected: ${e.message}` }],
+            isError: true,
+          };
+        }
+        throw e;
+      }
+      if (argv.length === 0) {
+        return {
+          content: [{ type: "text", text: "rejected: empty command" }],
+          isError: true,
+        };
+      }
+
+      const bin = argv[0];
+      if (!ALLOWED_BINS.has(bin)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `rejected: '${bin}' not in allowlist (${[...ALLOWED_BINS].join(", ")})`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      return await new Promise((resolveP) => {
+        const child = spawn(argv[0], argv.slice(1), {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: scrubbedEnv(),
+        });
+        let stdout = "";
+        let stderr = "";
+        let timedOut = false;
+
+        const timer = setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, COMMAND_TIMEOUT_MS);
+
+        child.stdout.on("data", (d) => (stdout += d));
+        child.stderr.on("data", (d) => (stderr += d));
+
+        const onAbort = () => child.kill("SIGKILL");
+        signal?.addEventListener("abort", onAbort, { once: true });
+
+        child.on("close", (code) => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          const exit = timedOut ? "timeout" : String(code);
+          const out = truncate(stdout, MAX_OUTPUT_BYTES);
+          const err = truncate(stderr, 8 * 1024);
+          resolveP({
+            content: [
+              {
+                type: "text",
+                text: `exit=${exit}\n--- stdout ---\n${out}\n--- stderr ---\n${err}`,
+              },
+            ],
+            details: {
+              exitCode: code,
+              timedOut,
+              stdoutBytes: stdout.length,
+              stderrBytes: stderr.length,
+            },
+            isError: timedOut || (code !== null && code !== 0),
+          });
+        });
+
+        child.on("error", (e) => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          resolveP({
+            content: [{ type: "text", text: `spawn error: ${e.message}` }],
+            details: { error: e.message },
+            isError: true,
+          });
+        });
+      });
+    },
+  });
+
+  pi.registerTool({
+    name: "write_output",
+    label: "write (outputs/ only)",
+    description:
+      "Write content to a file under outputs/ relative to CWD. Use this " +
+      "to emit phase artifacts like findings.json. Any path outside " +
+      "outputs/ is rejected.",
+    parameters: Type.Object({
+      path: Type.String({
+        description:
+          "Path under outputs/, e.g. 'outputs/findings.json'. " +
+          "Must not contain '..' segments.",
+      }),
+      content: Type.String({ description: "File contents." }),
+    }),
+    async execute(_id, { path, content }) {
+      const cwd = process.cwd();
+      const abs = resolve(cwd, path);
+      const rel = relative(cwd, abs);
+
+      if (
+        isAbsolute(rel) ||
+        rel.startsWith("..") ||
+        (rel !== OUTPUTS_DIR && !rel.startsWith(`${OUTPUTS_DIR}/`))
+      ) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `rejected: path must be under ${OUTPUTS_DIR}/ (got '${rel}')`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      await mkdir(dirname(abs), { recursive: true });
+      await writeFile(abs, content, "utf8");
+
+      return {
+        content: [{ type: "text", text: `wrote ${rel} (${content.length} bytes)` }],
+        details: { path: rel, bytes: content.length },
+      };
+    },
+  });
+}
+
+/**
+ * Strip secrets from the env we pass to spawned children. The model's
+ * tools should never see provider API keys or repo tokens beyond what
+ * the runner explicitly forwards.
+ */
+function scrubbedEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (
+      key === "LLM_API_KEY" ||
+      key.endsWith("_API_KEY") ||
+      key.endsWith("_KEY") ||
+      key === "GITHUB_TOKEN"
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
+}

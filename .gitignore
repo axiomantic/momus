@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Bot work dirs
+.momus/
+inputs/
+outputs/
+artifacts/
+
+# Node / Bun (extension tooling)
+node_modules/

@@ -1,0 +1,74 @@
+# momus — default configuration.
+#
+# A target repo can override any of these by committing
+# `.momus.yaml` at its repo root. Anything unset falls back to
+# the values here. Unrecognized keys are an error (fail loudly so typos
+# don't silently drop intent).
+
+review:
+  # Which severities trigger REQUEST_CHANGES. Anything not listed here is
+  # advisory (does not block merge). Subset of:
+  #   [critical, high, medium, low, nit]
+  blocking_severities: [critical, high, medium]
+
+  # Whether the model must write a one-line `_calibration` justification
+  # before emitting any blocking finding. Forces "would a human block?"
+  # discipline into the visible output.
+  require_calibration: true
+
+  # Whether the model may emit `nit`-severity findings at all.
+  # If false, the severity scale presented to the model omits `nit`.
+  emit_nits: true
+
+  # Cap on findings emitted per run. The model is instructed to
+  # consolidate redundant items rather than truncate; this is a hard
+  # ceiling for the publisher.
+  max_findings: 50
+
+  # Maximum "noteworthy" (good-work) callouts per run.
+  # 0 disables the section entirely.
+  noteworthy_max: 3
+
+  # Run-id scheme for finding IDs (e.g., BOT-A1, BOT-A2, ...).
+  #   alpha   — A, B, C, ... per re-review (matches styleseat)
+  #   numeric — 1, 2, 3, ... per re-review
+  #   off     — bare counter, no run prefix
+  run_id_scheme: alpha
+
+  # Free-text block injected into the phase 2 prompt under
+  # "Repo-specific emphasis." Use for project-level guidance that doesn't
+  # belong in docs/code-review-instructions.md (e.g., "this is embedded
+  # firmware, treat any panic/unwrap as critical"). Empty by default.
+  repo_emphasis: ""
+
+conventions:
+  # Files concatenated into `inputs/conventions.md` and presented to the
+  # model as repo conventions that override prompt defaults. Files that
+  # don't exist are silently skipped. Repos that want richer convention
+  # loading can extend this list in their own `.momus.yaml`.
+  files:
+    - AGENTS.md
+
+  # Glob patterns whose matches are also concatenated into conventions.md.
+  # None by default; opt in per repo.
+  globs: []
+
+post:
+  # APPROVE policy on the very first review of a PR (no prior bot reviews).
+  #   never        — never APPROVE on first review (matches styleseat)
+  #   if_no_findings — APPROVE only if findings list is empty
+  #   if_no_blocking — APPROVE if no blocking findings, even on first run
+  first_review_approve_policy: never
+
+  # Whether a user comment containing `lgtm` or `@bot approve` should
+  # override blocking findings. styleseat says no. Keep no.
+  allow_human_approve_override: false
+
+verify:
+  # Whether to run phase 3 (verify gate). When true, phase 3 audits
+  # phase 2's findings before posting; can rewrite or drop findings.
+  enabled: true
+
+  # If phase 3 finds nothing wrong AND phase 2 produced no findings,
+  # skip the post entirely instead of posting an empty review.
+  skip_post_on_empty: true

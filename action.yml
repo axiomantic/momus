@@ -1,0 +1,70 @@
+name: "Momus"
+description: "Run pi-coding-agent against a PR diff and publish a GitHub Review."
+
+inputs:
+  pr_number:
+    description: "Pull request number to review"
+    required: true
+  event:
+    description: "Triggering event name (pull_request | issue_comment | workflow_dispatch)"
+    required: true
+  work_dir:
+    description: "Working directory for inputs/, outputs/, prompts/"
+    required: false
+    default: ".momus"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v1
+      with:
+        bun-version: latest
+
+    - name: Install pi-coding-agent
+      shell: bash
+      run: |
+        bun install -g @mariozechner/pi-coding-agent
+        pi --version
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install momus
+      shell: bash
+      run: |
+        pip install "${{ github.action_path }}"
+
+    - name: Run momus
+      shell: bash
+      env:
+        # GITHUB_TOKEN is not auto-injected into composite action steps; the
+        # caller workflow exposes secrets.GITHUB_TOKEN by setting it as env on
+        # the `uses:` step that invokes this action. We compose GITHUB_RUN_URL
+        # here from the github context so callers do not have to.
+        # LLM_API_KEY / LLM_BASE_URL / LLM_MODEL are also expected to be set as
+        # env on the calling `uses:` step. We never echo these.
+        GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        OWNER="${GITHUB_REPOSITORY%%/*}"
+        REPO="${GITHUB_REPOSITORY#*/}"
+        momus \
+          --owner "$OWNER" \
+          --repo "$REPO" \
+          --pr-number "${{ inputs.pr_number }}" \
+          --event "${{ inputs.event }}" \
+          --repo-root "${{ github.workspace }}" \
+          --work-dir "${{ inputs.work_dir }}"
+
+    - name: Upload momus artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: momus-${{ inputs.pr_number }}-${{ github.run_id }}
+        path: |
+          ${{ inputs.work_dir }}/inputs/
+          ${{ inputs.work_dir }}/outputs/
+        retention-days: 7
+        if-no-files-found: ignore
