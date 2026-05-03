@@ -8,6 +8,7 @@ import os
 import string
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from .hunks import parse_unified_diff
 from .invoke_pi import invoke_pi_phase_with_retry
 from .preflight import preflight
 from .prep import prep_inputs
+from .progress import ProgressThrottle, ProgressTracker, estimate_phase_caps
 from .publish import publish
 from .status import post_status
 
@@ -80,15 +82,48 @@ def _run(
     outputs_dir = work_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
 
+    # Build the heuristic progress tracker. Phases included depend on whether
+    # there are priors (phase 1) and whether verify is enabled (phase 3).
+    phases_to_run: list[str] = []
+    if prior_threads:
+        phases_to_run.append("phase1")
+    phases_to_run.append("phase2")
+    if config.verify.enabled:
+        phases_to_run.append("phase3")
+    caps = estimate_phase_caps(
+        n_prior_threads=len(prior_threads),
+        n_touched_files=len(hunk_lines),
+    )
+    tracker = ProgressTracker(phases_to_run=phases_to_run, caps=caps)
+    throttle = ProgressThrottle(min_seconds=15.0, min_pct_delta=2)
+
+    def _post_progress(detail: str, *, force: bool = False) -> None:
+        pct = tracker.percent()
+        if not throttle.should_post(time.monotonic(), pct, force=force):
+            return
+        post_status(
+            state="running",
+            detail=detail,
+            progress_bar=tracker.bar(width=20),
+            percent=pct,
+            **status_kwargs,
+        )
+
     # Phase 1 — classify priors (skip if no prior threads)
     if prior_threads:
         _log(f"Phase 1: classifying {len(prior_threads)} prior threads")
-        post_status(
-            state="running",
-            detail=f"phase 1/3 — classifying {len(prior_threads)} prior threads",
-            **status_kwargs,
+        tracker.start("phase1")
+        phase1_detail = (
+            f"phase 1/{len(phases_to_run)} — classifying "
+            f"{len(prior_threads)} prior threads"
         )
-        invoke_pi_phase_with_retry("phase1", work_dir)
+        _post_progress(phase1_detail, force=True)
+        invoke_pi_phase_with_retry(
+            "phase1",
+            work_dir,
+            on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
+        )
+        tracker.finish("phase1")
         prior_findings = _read_outputs_json(outputs_dir / "prior-findings.json", default=[])
     else:
         prior_findings = []
@@ -96,8 +131,16 @@ def _run(
 
     # Phase 2 — review
     _log("Phase 2: review")
-    post_status(state="running", detail="phase 2/3 — reviewing diff", **status_kwargs)
-    invoke_pi_phase_with_retry("phase2", work_dir)
+    phase2_index = phases_to_run.index("phase2") + 1
+    phase2_detail = f"phase {phase2_index}/{len(phases_to_run)} — reviewing diff"
+    tracker.start("phase2")
+    _post_progress(phase2_detail, force=True)
+    invoke_pi_phase_with_retry(
+        "phase2",
+        work_dir,
+        on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
+    )
+    tracker.finish("phase2")
     findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
     # Preflight — deterministic checks.
@@ -117,22 +160,40 @@ def _run(
     # Phase 3 — verify (optional)
     if config.verify.enabled:
         _log("Phase 3: verify gate")
-        post_status(
-            state="running",
-            detail="phase 3/3 — verifying findings",
-            **status_kwargs,
+        phase3_detail = (
+            f"phase {len(phases_to_run)}/{len(phases_to_run)} — verifying findings"
         )
-        invoke_pi_phase_with_retry("phase3", work_dir)
+        tracker.start("phase3")
+        _post_progress(phase3_detail, force=True)
+        invoke_pi_phase_with_retry(
+            "phase3",
+            work_dir,
+            on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
+        )
+        tracker.finish("phase3")
         findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
     # Publish.
     verdict = findings_doc.get("verdict") or "COMMENT"
     _log(f"Publishing review (verdict={verdict})")
-    post_status(state="posting", detail=f"verdict {verdict}", **status_kwargs)
+    # Force a near-100% post on the way in to publish.
+    post_status(
+        state="posting",
+        detail=f"verdict {verdict}",
+        progress_bar=tracker.bar(width=20),
+        percent=tracker.percent(),
+        **status_kwargs,
+    )
     publish(findings_doc, prior_findings, pr_meta, config, run_url)
     n_findings = len(findings_doc.get("findings") or [])
     summary = f"verdict {verdict}, {n_findings} finding{'s' if n_findings != 1 else ''}"
-    post_status(state="done", detail=summary, **status_kwargs)
+    post_status(
+        state="done",
+        detail=summary,
+        progress_bar="█" * 20,
+        percent=100,
+        **status_kwargs,
+    )
     return 0
 
 

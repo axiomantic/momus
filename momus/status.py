@@ -34,6 +34,8 @@ def post_status(
     state: str,
     detail: str = "",
     run_url: str = "",
+    progress_bar: str = "",
+    percent: int | None = None,
 ) -> None:
     """
     Upsert the sticky status comment.
@@ -41,12 +43,20 @@ def post_status(
     ``state`` is one of: starting, running, posting, done, failed.
     ``detail`` is a short human phrase appended to the headline.
     ``run_url`` (optional) is appended as a link.
+    ``progress_bar`` is the unicode bar string; when given, it is rendered
+    on its own line with ``percent`` (e.g. ``████░░░ 47%``).
 
     Failures are swallowed and reported to stderr. The review run takes
     priority over status visibility.
     """
     try:
-        body = _render_body(state=state, detail=detail, run_url=run_url)
+        body = _render_body(
+            state=state,
+            detail=detail,
+            run_url=run_url,
+            progress_bar=progress_bar,
+            percent=percent,
+        )
         comment_id = _find_existing_comment(owner, repo, pr_number)
         if comment_id is None:
             _create_comment(owner, repo, pr_number, body)
@@ -56,13 +66,28 @@ def post_status(
         print(f"[momus.status] post failed: {exc}", file=sys.stderr, flush=True)
 
 
-def _render_body(*, state: str, detail: str, run_url: str) -> str:
+def _render_body(
+    *,
+    state: str,
+    detail: str,
+    run_url: str,
+    progress_bar: str = "",
+    percent: int | None = None,
+) -> str:
     icon = _state_icon(state)
     headline = _state_headline(state)
     line = f"{icon} **{headline}**"
     if detail:
         line += f" — {detail}"
     parts: list[str] = [line]
+    if progress_bar:
+        # Wrap in backticks so the box-drawing chars render with monospace
+        # spacing in GitHub markdown (otherwise proportional font breaks
+        # the alignment between filled and empty cells).
+        if percent is not None:
+            parts.append(f"`{progress_bar}` **{percent}%**")
+        else:
+            parts.append(f"`{progress_bar}`")
     if state in ("starting", "running", "posting"):
         parts.append(f'<img src="{STATUS_GIF_URL}" alt="Momus working" width="120">')
     if run_url:

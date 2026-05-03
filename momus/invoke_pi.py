@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
 
@@ -39,6 +40,7 @@ def invoke_pi_phase(
     phase: str,
     work_dir: Path,
     extra_prompt_suffix: str | None = None,
+    on_tool_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """
     Run a phase. ``work_dir`` is the CWD pi will see (must contain the
@@ -89,6 +91,18 @@ def invoke_pi_phase(
             event = _parse_one_line(line)
             events.append(event)
             _log_event(phase, event, line)
+            # Within-phase progress signal: each completed tool execution
+            # is one tick. Failures in the callback MUST NOT abort the
+            # phase — progress reporting is best-effort.
+            if on_tool_complete and event.get("type") == "tool_execution_end":
+                try:
+                    on_tool_complete()
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"[momus.pi {phase}] progress callback error: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
         proc.wait()
         # Now safe to read stderr (process exited).
         if proc.stderr is not None:
@@ -245,14 +259,18 @@ def _extract_result_text(result: dict) -> str:
     return "\n".join(chunks)
 
 
-def invoke_pi_phase_with_retry(phase: str, work_dir: Path) -> list[dict]:
+def invoke_pi_phase_with_retry(
+    phase: str,
+    work_dir: Path,
+    on_tool_complete: Callable[[], None] | None = None,
+) -> list[dict]:
     """
     Defense-in-depth wrapper around ``invoke_pi_phase``. If the phase exits
     0 but the expected output file is missing (model ended its turn without
     calling ``write_output``), retry once with a hard reminder appended to
     the prompt. Phases not in ``PHASE_EXPECTED_OUTPUTS`` skip the guard.
     """
-    events = invoke_pi_phase(phase, work_dir)
+    events = invoke_pi_phase(phase, work_dir, on_tool_complete=on_tool_complete)
     expected_rel = PHASE_EXPECTED_OUTPUTS.get(phase)
     if expected_rel is None:
         return events
@@ -270,7 +288,12 @@ def invoke_pi_phase_with_retry(phase: str, work_dir: Path) -> list[dict]:
         "file. Do NOT respond with prose only; call `write_output` before "
         "ending your turn."
     )
-    events = invoke_pi_phase(phase, work_dir, extra_prompt_suffix=suffix)
+    events = invoke_pi_phase(
+        phase,
+        work_dir,
+        extra_prompt_suffix=suffix,
+        on_tool_complete=on_tool_complete,
+    )
     if not expected_path.exists():
         raise PiInvocationError(
             f"phase {phase} did not produce expected output {expected_rel} "
