@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-DEFAULTS_PATH = Path(__file__).resolve().parent.parent / "config-defaults.yaml"
+DEFAULTS_PATH = Path(__file__).resolve().parent / "config-defaults.yaml"
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "low", "nit"}
 ALLOWED_RUN_ID_SCHEMES = {"alpha", "numeric", "off"}
 ALLOWED_FIRST_REVIEW_POLICIES = {"never", "if_no_findings", "if_no_blocking"}

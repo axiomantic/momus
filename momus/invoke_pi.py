@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-EXTENSION_PATH = Path(__file__).resolve().parent.parent / "extensions" / "readonly-tools.ts"
+EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
 
 PHASE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
     # Phase 1 needs no tools — input is a JSON file the model reads via the

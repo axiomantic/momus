@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import Config
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
 def render_phase_prompt(phase: str, config: Config, run_id: str) -> str:

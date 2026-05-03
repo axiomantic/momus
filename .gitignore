@@ -27,3 +27,4 @@ artifacts/
 
 # Node / Bun (extension tooling)
 node_modules/
+dist/
