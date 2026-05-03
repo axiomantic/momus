@@ -124,29 +124,125 @@ def _parse_one_line(line: str) -> dict:
 
 
 def _log_event(phase: str, event: dict, raw: str) -> None:
-    """Print a one-line human summary for each pi event to stderr."""
+    """
+    Emit a debuggable one-line summary for pi events to stderr.
+
+    Pi streams token-level deltas inside `message_update` events; logging
+    each one is pure noise. We only emit on completion boundaries — when
+    a text block, tool call, or tool execution actually has content worth
+    looking at — and on high-level lifecycle events.
+
+    Schema reference: pi-mono coding-agent rpc.md.
+    """
     et = event.get("type", "?")
-    if et == "_blank":
+    if et in ("_blank", "message_start", "message_end"):
         return
     if et == "_unparsed":
         print(f"[momus.pi {phase}] (raw) {raw[:300]}", file=sys.stderr, flush=True)
         return
-    # Best-effort summary: pull common fields if present, else show keys.
-    summary_bits: list[str] = [f"type={et}"]
-    for k in ("name", "tool", "phase", "model", "role", "status", "error"):
-        if k in event and event[k]:
-            v = str(event[k])
-            if len(v) > 80:
-                v = v[:77] + "..."
-            summary_bits.append(f"{k}={v}")
-    # If there's a text payload, show a snippet.
-    text = event.get("text") or event.get("delta") or event.get("content")
-    if isinstance(text, str) and text.strip():
-        snippet = text.strip().replace("\n", " ")
-        if len(snippet) > 200:
-            snippet = snippet[:197] + "..."
-        summary_bits.append(f'text="{snippet}"')
-    print(f"[momus.pi {phase}] " + " ".join(summary_bits), file=sys.stderr, flush=True)
+
+    if et == "message_update":
+        sub = event.get("assistantMessageEvent") or {}
+        sub_type = sub.get("type", "")
+        # text_end: assistant text block fully assembled. Emit the content.
+        if sub_type == "text_end":
+            content = sub.get("content") or ""
+            _emit(phase, "assistant", content)
+            return
+        if sub_type == "thinking_end":
+            content = sub.get("content") or ""
+            _emit(phase, "thinking", content)
+            return
+        # toolcall_end: full tool call decided. Emit name + arg preview.
+        if sub_type == "toolcall_end":
+            tc = sub.get("toolCall") or {}
+            name = tc.get("name", "?")
+            args = tc.get("arguments") or tc.get("args") or {}
+            _emit(phase, f"tool_call {name}", _summarize_args(args))
+            return
+        if sub_type == "error":
+            reason = sub.get("reason", "?")
+            print(
+                f"[momus.pi {phase}] message error reason={reason}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        # All other sub-types (start, *_delta, done) are streaming noise.
+        return
+
+    if et == "tool_execution_start":
+        name = event.get("toolName", "?")
+        args = event.get("args") or {}
+        _emit(phase, f"running {name}", _summarize_args(args))
+        return
+
+    if et == "tool_execution_end":
+        name = event.get("toolName", "?")
+        is_error = bool(event.get("isError"))
+        result = event.get("result") or {}
+        text = _extract_result_text(result)
+        label = f"tool_error {name}" if is_error else f"tool_result {name}"
+        _emit(phase, label, text)
+        return
+
+    if et == "tool_execution_update":
+        # Partial results — skip; tool_execution_end carries the full thing.
+        return
+
+    if et in ("session", "agent_start", "agent_end", "turn_start", "turn_end",
+              "compaction_start", "compaction_end", "queue_update"):
+        bits: list[str] = []
+        for k in ("reason", "model", "messageCount"):
+            if k in event and event[k] not in (None, ""):
+                bits.append(f"{k}={event[k]}")
+        suffix = (" " + " ".join(bits)) if bits else ""
+        print(f"[momus.pi {phase}] {et}{suffix}", file=sys.stderr, flush=True)
+        return
+
+    # Unknown event type: print compactly so we notice it but don't bury logs.
+    print(f"[momus.pi {phase}] {et}", file=sys.stderr, flush=True)
+
+
+def _emit(phase: str, label: str, text: str) -> None:
+    snippet = (text or "").strip().replace("\n", " \\n ")
+    if not snippet:
+        return
+    if len(snippet) > 300:
+        snippet = snippet[:297] + "..."
+    print(f"[momus.pi {phase}] {label}: {snippet}", file=sys.stderr, flush=True)
+
+
+def _summarize_args(args: dict) -> str:
+    """Compact preview of tool args: key=value pairs, values truncated."""
+    if not isinstance(args, dict) or not args:
+        return ""
+    parts: list[str] = []
+    for k, v in args.items():
+        if isinstance(v, str):
+            sv = v.replace("\n", " ")
+            if len(sv) > 120:
+                sv = sv[:117] + "..."
+        else:
+            sv = json.dumps(v, separators=(",", ":"))
+            if len(sv) > 120:
+                sv = sv[:117] + "..."
+        parts.append(f"{k}={sv}")
+    return " ".join(parts)
+
+
+def _extract_result_text(result: dict) -> str:
+    """Pull a text snippet out of a tool result's content array."""
+    content = result.get("content")
+    if not isinstance(content, list):
+        return ""
+    chunks: list[str] = []
+    for item in content:
+        if isinstance(item, dict):
+            t = item.get("text") or item.get("content")
+            if isinstance(t, str):
+                chunks.append(t)
+    return "\n".join(chunks)
 
 
 def invoke_pi_phase_with_retry(phase: str, work_dir: Path) -> list[dict]:

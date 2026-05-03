@@ -233,3 +233,92 @@ def test_phase_expected_outputs_mapping_is_exactly_three_phases() -> None:
         "phase2": "outputs/findings.json",
         "phase3": "outputs/findings.json",
     }
+
+
+def _capture_log(event: dict, capsys: pytest.CaptureFixture[str]) -> str:
+    """Run _log_event for a single event and return its stderr output."""
+    capsys.readouterr()
+    invoke_pi_mod._log_event("phase2", event, json.dumps(event))
+    return capsys.readouterr().err
+
+
+def test_log_event_suppresses_streaming_deltas(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # text_delta, toolcall_delta, *_start, message_start/end are all noise.
+    for noisy in [
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "Hi"}},
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}},
+        {"type": "message_update", "assistantMessageEvent": {"type": "toolcall_delta", "delta": "x"}},
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "x"}},
+        {"type": "message_update", "assistantMessageEvent": {"type": "done", "reason": "stop"}},
+        {"type": "message_start"},
+        {"type": "message_end"},
+        {"type": "tool_execution_update", "toolName": "bash"},
+    ]:
+        assert _capture_log(noisy, capsys) == "", f"should suppress: {noisy}"
+
+
+def test_log_event_emits_assembled_assistant_text(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    event = {
+        "type": "message_update",
+        "assistantMessageEvent": {"type": "text_end", "content": "Hello world"},
+    }
+    out = _capture_log(event, capsys)
+    assert "[momus.pi phase2] assistant: Hello world" in out
+
+
+def test_log_event_emits_tool_call_with_args(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    event = {
+        "type": "message_update",
+        "assistantMessageEvent": {
+            "type": "toolcall_end",
+            "toolCall": {"name": "read", "arguments": {"path": "src/main.py"}},
+        },
+    }
+    out = _capture_log(event, capsys)
+    assert "[momus.pi phase2] tool_call read: path=src/main.py" in out
+
+
+def test_log_event_emits_tool_execution_start_and_end(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    start = {
+        "type": "tool_execution_start",
+        "toolName": "bash",
+        "args": {"command": "ls -la"},
+    }
+    end = {
+        "type": "tool_execution_end",
+        "toolName": "bash",
+        "isError": False,
+        "result": {"content": [{"type": "text", "text": "total 4\nfile.txt"}]},
+    }
+    assert "[momus.pi phase2] running bash: command=ls -la" in _capture_log(start, capsys)
+    assert "[momus.pi phase2] tool_result bash: total 4 \\n file.txt" in _capture_log(
+        end, capsys
+    )
+
+
+def test_log_event_marks_tool_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    event = {
+        "type": "tool_execution_end",
+        "toolName": "bash",
+        "isError": True,
+        "result": {"content": [{"type": "text", "text": "exit 1: not found"}]},
+    }
+    out = _capture_log(event, capsys)
+    assert "[momus.pi phase2] tool_error bash:" in out
+
+
+def test_log_event_lifecycle_events_pass_through(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = _capture_log({"type": "agent_start", "model": "deepseek/v4"}, capsys)
+    assert "[momus.pi phase2] agent_start model=deepseek/v4" in out
+    out = _capture_log({"type": "compaction_start", "reason": "threshold"}, capsys)
+    assert "[momus.pi phase2] compaction_start reason=threshold" in out
