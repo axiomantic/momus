@@ -56,6 +56,14 @@ def _run(
 
     config = load_config(repo_root)
 
+    # Per-repo provider overrides take precedence over the workflow's
+    # LLM_MODEL / LLM_BASE_URL env vars. This lets a repo opt into a
+    # different model or endpoint without changing the org-wide workflow.
+    if config.provider.model:
+        os.environ["LLM_MODEL"] = config.provider.model
+    if config.provider.base_url:
+        os.environ["LLM_BASE_URL"] = config.provider.base_url
+
     pr_meta = _build_pr_meta(args)
 
     # Phase 0a: prior-thread fetch (only if there might be priors).

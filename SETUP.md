@@ -170,6 +170,11 @@ verify:
 checks:
   enabled: true   # post a Check Run alongside the Review (see below)
   name: Momus Code Review
+provider:
+  # Per-repo override of the workflow's LLM_MODEL/LLM_BASE_URL inputs.
+  # Empty strings (the default) inherit from the workflow.
+  model: anthropic/claude-sonnet-4-6
+  base_url: https://api.anthropic.com/v1
 ```
 
 ## Check Runs (optional)

@@ -13,6 +13,7 @@ from momus.config import (
     Config,
     ConventionsConfig,
     PostConfig,
+    ProviderConfig,
     ReviewConfig,
     VerifyConfig,
 )
@@ -36,6 +37,7 @@ def _minimal_config() -> Config:
         ),
         verify=VerifyConfig(enabled=True),
         checks=ChecksConfig(enabled=False, name="Momus Code Review"),
+        provider=ProviderConfig(model="", base_url=""),
     )
 
 

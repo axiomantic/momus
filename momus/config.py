@@ -43,6 +43,20 @@ class VerifyConfig:
 
 
 @dataclass
+class ProviderConfig:
+    """
+    LLM provider override at the per-repo level. Empty strings mean
+    "use whatever the workflow set in LLM_MODEL / LLM_BASE_URL". Set
+    explicitly here when a particular repo needs a different model
+    or endpoint than the workflow's default (e.g. one repo uses
+    Claude direct while the rest use OpenRouter).
+    """
+
+    model: str
+    base_url: str
+
+
+@dataclass
 class ChecksConfig:
     """
     Optional Check Run posting alongside the Review object. When enabled,
@@ -63,6 +77,7 @@ class Config:
     post: PostConfig
     verify: VerifyConfig
     checks: ChecksConfig
+    provider: ProviderConfig
 
 
 def load_config(repo_root: Path) -> Config:
@@ -101,6 +116,7 @@ def _to_config(data: dict[str, Any]) -> Config:
     post = data.get("post", {})
     verify = data.get("verify", {})
     checks = data.get("checks", {})
+    provider = data.get("provider", {})
 
     blocking = list(review.get("blocking_severities", []))
     bad = [s for s in blocking if s not in ALLOWED_SEVERITIES]
@@ -142,5 +158,9 @@ def _to_config(data: dict[str, Any]) -> Config:
         checks=ChecksConfig(
             enabled=bool(checks.get("enabled", False)),
             name=str(checks.get("name", "Momus Code Review")),
+        ),
+        provider=ProviderConfig(
+            model=str(provider.get("model", "")),
+            base_url=str(provider.get("base_url", "")),
         ),
     )

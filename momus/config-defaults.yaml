@@ -82,3 +82,19 @@ checks:
   # list alongside CI ("Momus Code Review / passed"), so the qualifier
   # disambiguates it from build/test/lint checks. Override per repo.
   name: Momus Code Review
+
+provider:
+  # LLM model slug. Empty string means "use whatever the workflow
+  # set in LLM_MODEL". Override here when this repo needs a different
+  # model than the workflow default, e.g.:
+  #   model: anthropic/claude-sonnet-4-6
+  #   model: openai/gpt-4o
+  # The slug must be one your provider/base_url accepts.
+  model: ""
+
+  # API base URL. Empty string means "use whatever the workflow set in
+  # LLM_BASE_URL". Override here for a different endpoint, e.g.:
+  #   base_url: https://api.anthropic.com/v1   # Anthropic direct
+  #   base_url: https://api.openai.com/v1      # OpenAI direct
+  # The matching API key still comes from the LLM_API_KEY secret.
+  base_url: ""
