@@ -26,10 +26,12 @@ and add:
 
 | Secret | Value |
 |---|---|
-| `OPENROUTER_KEY` | Your OpenRouter API key (or any OpenAI-compatible provider key — the variable is named `OPENROUTER_KEY` for legacy reasons but accepts any provider) |
+| `LLM_API_KEY` | API key for any OpenAI-compatible provider (OpenRouter, Anthropic via OpenRouter, OpenAI, Bedrock proxy, etc.) |
 
 You can override the default model and base URL per repo via the workflow's
-`with: model:` / `with: base_url:` inputs (see step 3).
+`with: model:` / `with: base_url:` inputs (see step 3). The defaults point
+at OpenRouter's endpoint and DeepSeek V4 Pro, so an OpenRouter key is the
+zero-config path.
 
 ---
 
@@ -128,7 +130,7 @@ jobs:
       trigger_command: /ai-review
       trigger_mention: "@<your-org>-momus[bot]"
     secrets:
-      OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       # Optional. Omit these to fall back to GITHUB_TOKEN (no APPROVE).
       MOMUS_APP_ID: ${{ secrets.MOMUS_APP_ID }}
       MOMUS_APP_PRIVATE_KEY: ${{ secrets.MOMUS_APP_PRIVATE_KEY }}
