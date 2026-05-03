@@ -40,7 +40,6 @@ class PostConfig:
 @dataclass
 class VerifyConfig:
     enabled: bool
-    skip_post_on_empty: bool
 
 
 @dataclass
@@ -123,6 +122,5 @@ def _to_config(data: dict[str, Any]) -> Config:
         ),
         verify=VerifyConfig(
             enabled=bool(verify.get("enabled", True)),
-            skip_post_on_empty=bool(verify.get("skip_post_on_empty", True)),
         ),
     )

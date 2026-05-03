@@ -68,7 +68,3 @@ verify:
   # Whether to run phase 3 (verify gate). When true, phase 3 audits
   # phase 2's findings before posting; can rewrite or drop findings.
   enabled: true
-
-  # If phase 3 finds nothing wrong AND phase 2 produced no findings,
-  # skip the post entirely instead of posting an empty review.
-  skip_post_on_empty: true

@@ -33,7 +33,7 @@ def _minimal_config() -> Config:
             first_review_approve_policy="if_no_findings",
             allow_human_approve_override=False,
         ),
-        verify=VerifyConfig(enabled=True, skip_post_on_empty=True),
+        verify=VerifyConfig(enabled=True),
     )
 
 

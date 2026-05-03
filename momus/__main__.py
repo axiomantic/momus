@@ -91,15 +91,6 @@ def main(argv: list[str] | None = None) -> int:
         invoke_pi_phase_with_retry("phase3", work_dir)
         findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
-    # Skip post if empty.
-    no_findings = not findings_doc.get("findings")
-    no_priors_pending = not any(
-        p.get("status") not in ("DECLINED",) for p in prior_findings
-    )
-    if config.verify.skip_post_on_empty and no_findings and no_priors_pending:
-        _log("No findings and no pending priors. Skipping post.")
-        return 0
-
     # Publish.
     _log(f"Publishing review (verdict={findings_doc.get('verdict')})")
     publish(findings_doc, prior_findings, pr_meta, config, run_url)
