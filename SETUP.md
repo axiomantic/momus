@@ -72,7 +72,8 @@ keys, and what the workflow defaults to.
 - **Get a key**: https://openrouter.ai/settings/keys
 - **Base URL**: `https://openrouter.ai/api/v1`
 - **Suggested models**:
-  - `deepseek/deepseek-v4-pro` (default — strong code review at low cost)
+  - `deepseek/deepseek-chat` (default — solid code review at low cost)
+  - `deepseek/deepseek-v4-flash` (newer, reasoning-capable; needs higher max_tokens)
   - `anthropic/claude-sonnet-4-6` (high quality, more expensive)
   - `openai/gpt-4o`
   - `google/gemini-2.0-flash` (cheapest)

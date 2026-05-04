@@ -56,7 +56,7 @@ Set these env vars on the workflow job:
 
 - `LLM_API_KEY` — API key for whichever provider
 - `LLM_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
-- `LLM_MODEL` — model slug (e.g. `deepseek/deepseek-v4-pro`)
+- `LLM_MODEL` — model slug (e.g. `deepseek/deepseek-chat`)
 
 The runner translates these into pi's `--provider`, `--model`,
 `--base-url`, `--api-key-env` arguments. The bot itself reads no
