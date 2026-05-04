@@ -19,6 +19,37 @@ your bot can actually approve clean PRs.
 
 ---
 
+## Quickstart
+
+If you'd rather not click through the GitHub UI for App creation:
+
+1. Open the **[Momus installer page](https://axiomantic.github.io/momus/install/)**.
+   Pick "user" or "org", click the button, GitHub creates the App from a
+   pre-filled manifest, and the page hands you back the App ID and a
+   downloadable private key.
+2. Save the `.pem` file from the page.
+3. Run the install script (the page generates the exact command for you):
+   ```sh
+   git clone https://github.com/axiomantic/momus.git && cd momus
+   ./scripts/install.sh \
+     --app-id <ID-from-page> \
+     --pem ~/Downloads/<your-app>.private-key.pem \
+     --llm-key-file ~/.config/momus/llm-key \
+     --reusable-owner axiomantic \
+     --trigger-mention '@<your-app>[bot]' \
+     owner/repo [owner/repo ...]
+   ```
+   Add `--org-secrets <orgname>` to set secrets at the org level instead of
+   per-repo (requires `admin:org` token scope).
+
+That sets the three secrets and writes `.github/workflows/momus.yml` on each
+target repo. Total time: ~2 minutes.
+
+The rest of this document is the explicit, click-by-click manual setup —
+read it if the quickstart fails or you want to understand each piece.
+
+---
+
 ## 1. Add the LLM provider secret
 
 Momus speaks the OpenAI Chat Completions wire format, so any provider

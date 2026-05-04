@@ -5,8 +5,7 @@
 # Sets per-repo on the 10 most-recently-updated non-fork elijahr repos:
 #   MOMUS_APP_ID
 #   MOMUS_APP_PRIVATE_KEY
-#   LLM_API_KEY               (renamed from OPENROUTER_KEY)
-# and removes the legacy OPENROUTER_KEY secret.
+#   LLM_API_KEY
 #
 # Sets at the axiomantic org level (visibility: all):
 #   MOMUS_APP_ID
@@ -20,13 +19,13 @@
 # Required env vars:
 #   MOMUS_APP_ID                          (default: 3586842)
 #   MOMUS_APP_PRIVATE_KEY_PATH            path to .pem
-#   LLM_API_KEY  OR  OPENROUTER_KEY       value to write as LLM_API_KEY
+#   LLM_API_KEY                           value to write as LLM_API_KEY
 
 set -euo pipefail
 
 APP_ID="${MOMUS_APP_ID:-3586842}"
 PEM_PATH="${MOMUS_APP_PRIVATE_KEY_PATH:-/Users/eek/Downloads/axiomantic-momus.2026-05-03.private-key.pem}"
-LLM_KEY="${LLM_API_KEY:-${OPENROUTER_KEY:-}}"
+LLM_KEY="${LLM_API_KEY:-}"
 ELIJAHR_REPO_LIMIT="${ELIJAHR_REPO_LIMIT:-10}"
 
 err() { printf '\033[31m%s\033[0m\n' "$*" >&2; }
@@ -44,8 +43,8 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 if [ -z "$LLM_KEY" ]; then
-  warn "Neither LLM_API_KEY nor OPENROUTER_KEY env var set."
-  warn "The LLM_API_KEY rename step will be SKIPPED."
+  warn "LLM_API_KEY env var not set."
+  warn "The LLM_API_KEY write step will be SKIPPED."
 fi
 
 # --- Discover elijahr repos -------------------------------------------------
@@ -78,15 +77,6 @@ set_repo_secret() {
   fi
 }
 
-delete_repo_secret_if_exists() {
-  local repo="$1" name="$2"
-  if gh secret list --repo "elijahr/$repo" --json name --jq '.[].name' \
-      | grep -qx "$name"; then
-    gh secret delete "$name" --repo "elijahr/$repo" >/dev/null
-    info "    [elijahr/$repo] deleted legacy $name"
-  fi
-}
-
 for r in "${REPOS[@]}"; do
   info "==> elijahr/$r"
   set_repo_secret "$r" MOMUS_APP_ID "$APP_ID" value
@@ -96,7 +86,6 @@ for r in "${REPOS[@]}"; do
   if [ -n "$LLM_KEY" ]; then
     set_repo_secret "$r" LLM_API_KEY "$LLM_KEY" value
     ok   "    [elijahr/$r] LLM_API_KEY set"
-    delete_repo_secret_if_exists "$r" OPENROUTER_KEY
   fi
 done
 
