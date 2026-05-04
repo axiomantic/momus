@@ -151,6 +151,34 @@ export default function (pi: ExtensionAPI) {
     ],
   });
 
+  // DeepSeek thinking-mode round-trip shim.
+  //
+  // DeepSeek's contract: when an assistant turn returned `reasoning_content`,
+  // that field MUST be present on the assistant message in subsequent
+  // messages[] arrays, otherwise the API returns 20015
+  // ("The `reasoning_content` in the thinking mode must be passed back to
+  // the API."). When DeepSeek is reached via OpenRouter, the upstream stream
+  // normalizes the field to `delta.reasoning`, and pi-ai (0.73.0) captures
+  // the thinking block with `thinkingSignature: "reasoning"`. Pi-ai's
+  // openai-completions serializer then writes the content back as
+  // `assistantMsg.reasoning` (using the captured signature as the field
+  // name). OpenRouter forwards the body to DeepSeek as-is, DeepSeek sees
+  // `reasoning` instead of `reasoning_content`, and rejects the next turn —
+  // which manifests as either a 400/20015 or as the upstream closing the
+  // stream early ("provider error: terminated").
+  //
+  // Fix: rewrite the captured signature from `reasoning` to
+  // `reasoning_content` on the `context` event (fires before each LLM
+  // call). Pi-ai then serializes the field with the name DeepSeek requires.
+  // The rewrite is gated on baseUrl + model id so non-DeepSeek models and
+  // direct DeepSeek-API users (whose stream already emits
+  // `delta.reasoning_content`) are not affected.
+  if (isDeepSeekViaOpenRouter(baseUrl, model)) {
+    pi.on("context", (event) => {
+      rewriteThinkingSignaturesForDeepSeek(event.messages);
+    });
+  }
+
   pi.registerTool({
     name: "bash_ro",
     label: "bash (read-only)",
@@ -301,6 +329,42 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
+}
+
+/**
+ * Detect the OpenRouter+DeepSeek combination that needs the
+ * thinking-signature rewrite. Returns true when the configured base URL
+ * routes through OpenRouter AND the model id is a DeepSeek model. Any
+ * DeepSeek model id is matched: thinking variants need the field, and
+ * non-thinking variants emit no thinking blocks so the rewrite is a
+ * harmless no-op.
+ */
+export function isDeepSeekViaOpenRouter(baseUrl: string, model: string): boolean {
+  return baseUrl.includes("openrouter.ai") && model.startsWith("deepseek/");
+}
+
+/**
+ * Rewrite thinking blocks captured with `thinkingSignature: "reasoning"`
+ * (OpenRouter's normalized streaming form) to
+ * `thinkingSignature: "reasoning_content"` (the field name DeepSeek
+ * requires on round-trip). Mutates blocks in place.
+ *
+ * Exported for testing; the in-band caller is the `context` event handler
+ * registered above.
+ */
+export function rewriteThinkingSignaturesForDeepSeek(
+  messages: ReadonlyArray<unknown>,
+): void {
+  for (const m of messages) {
+    const msg = m as { role?: string; content?: unknown };
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+    for (const b of msg.content) {
+      const block = b as { type?: string; thinkingSignature?: string };
+      if (block.type === "thinking" && block.thinkingSignature === "reasoning") {
+        block.thinkingSignature = "reasoning_content";
+      }
+    }
+  }
 }
 
 /**
