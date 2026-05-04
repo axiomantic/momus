@@ -178,17 +178,13 @@ def test_bot_token_approve_downgrades_to_comment():
     )
 
 
-def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
-    """If we can't determine the token user, do NOT downgrade.
+def test_token_lookup_failure_outside_ci_does_not_downgrade(
+    capsys, monkeypatch
+):
+    """Outside Actions, an unknown token defers to GitHub: leave APPROVE alone."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
 
-    NOTE: production code currently emits no stderr warning on this path; the
-    intended-but-unimplemented warning would read::
-
-        momus: warning: could not determine GH token user; skipping APPROVE
-        downgrade check.
-
-    See deliverable notes — this is a real gap in publish.py.
-    """
     cfg = _minimal_config()
     pr_meta = _pr_meta(author="elijahr")
     findings = _findings_doc(verdict="APPROVE")
@@ -196,9 +192,6 @@ def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     gh_api.returns({})
     user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
-    # _get_token_user_info is invoked once by _approve_downgrade_reason and
-    # returns None, so no downgrade reason is determined and verdict stays
-    # APPROVE.
     user_info.returns(None)
 
     with tripwire:
@@ -219,10 +212,91 @@ def test_token_lookup_failure_does_not_downgrade_warns_stderr(capsys):
         ),
         kwargs={},
     )
-    captured = capsys.readouterr()
-    # Production currently does not emit this warning. When publish.py is
-    # updated to warn, change this assertion to the expected message.
-    assert captured.err == ""
+    assert capsys.readouterr().err == ""
+
+
+def test_default_github_token_in_actions_downgrades(monkeypatch):
+    """Inside Actions with no custom App configured, downgrade APPROVE.
+
+    The default `GITHUB_TOKEN` (a `github-actions` App installation token)
+    cannot APPROVE — GitHub rejects approvals from that user. The workflow
+    signals "no custom App" by leaving `MOMUS_USING_APP_TOKEN` unset.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
+
+    cfg = _minimal_config()
+    pr_meta = _pr_meta(author="some-human")
+    findings = _findings_doc(verdict="APPROVE")
+
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns(None)
+
+    with tripwire:
+        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+
+    expected_note = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because the "
+        "default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; "
+        "see SETUP.md)._\n\n"
+    )
+    expected_body = expected_note + _expected_rendered_body(
+        findings, run_url="https://run/1"
+    )
+    user_info.assert_call(args=(), kwargs={})
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
+
+
+def test_custom_app_token_in_actions_does_not_downgrade(monkeypatch):
+    """Inside Actions with a custom GitHub App token, allow APPROVE through.
+
+    The workflow's detect-app step sets `MOMUS_USING_APP_TOKEN=true` when the
+    user has configured an App. App installation tokens may APPROVE PRs.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("MOMUS_USING_APP_TOKEN", "true")
+
+    cfg = _minimal_config()
+    pr_meta = _pr_meta(author="some-human")
+    findings = _findings_doc(verdict="APPROVE")
+
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns(None)
+
+    with tripwire:
+        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+
+    expected_body = _expected_rendered_body(findings, run_url="https://run/1")
+    user_info.assert_call(args=(), kwargs={})
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
 
 
 def test_422_self_approval_message_reraises_no_retry():

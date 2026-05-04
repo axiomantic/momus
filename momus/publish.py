@@ -372,12 +372,14 @@ def _approve_downgrade_reason(pr_author: str | None) -> str | None:
     """Return a one-line reason if APPROVE should be downgraded; else None."""
     info = _get_token_user_info()
     if info is None:
-        # `gh api /user` returns 4xx for installation tokens (the default
-        # GITHUB_TOKEN inside Actions). Inside CI, treat that as a bot token
-        # that cannot approve. Outside CI, leave the verdict alone and let
-        # GitHub reject if applicable.
+        # `gh api /user` 4xxs for any installation token — both the default
+        # GITHUB_TOKEN (which GitHub *will* reject for APPROVE) and a custom
+        # GitHub App installation token (which is allowed to APPROVE). The
+        # workflow tells us which one we have via MOMUS_USING_APP_TOKEN.
+        if os.environ.get("MOMUS_USING_APP_TOKEN") == "true":
+            return None
         if os.environ.get("GITHUB_ACTIONS") == "true":
-            return "the GitHub Actions installation token cannot approve PRs"
+            return "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
         return None
     login = info.get("login", "")
     user_type = info.get("type", "")
