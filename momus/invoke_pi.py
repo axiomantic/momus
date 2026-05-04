@@ -125,7 +125,36 @@ def invoke_pi_phase(
             f"last event: {last}\n"
             f"stderr: {chr(10).join(stderr_tail).strip()}"
         )
+    # Pi exits 0 even when the model itself returned an error (e.g. 401 from
+    # the provider). The error string is buried inside an assistant message's
+    # stopReason/errorMessage rather than a top-level error event, and the
+    # output-existence retry guard in invoke_pi_phase_with_retry can't
+    # distinguish "model returned no tool call" from "model never ran".
+    # Surface it loudly here so a bad provider key fails fast instead of
+    # masquerading as an empty turn.
+    err_msg = _find_provider_error(events)
+    if err_msg is not None:
+        raise PiInvocationError(
+            f"phase {phase} failed: provider error: {err_msg}"
+        )
     return events
+
+
+def _find_provider_error(events: list[dict]) -> str | None:
+    """Scan event stream for an assistant message that ended with stopReason=error.
+
+    Pi emits these on message_end / turn_end / agent_end with the error string
+    in ``.message.errorMessage``. We only look at message-end events to keep
+    the check cheap and unambiguous.
+    """
+    for ev in events:
+        if ev.get("type") != "message_end":
+            continue
+        msg = ev.get("message") or {}
+        if msg.get("stopReason") == "error":
+            err = msg.get("errorMessage") or "<no errorMessage>"
+            return str(err)
+    return None
 
 
 def _parse_one_line(line: str) -> dict:

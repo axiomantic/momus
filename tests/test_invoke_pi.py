@@ -204,6 +204,54 @@ def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
     run_mock.assert_call(args=args, kwargs=kwargs)
 
 
+def test_provider_error_in_message_end_raises(tmp_path: Path) -> None:
+    """
+    Pi exits 0 with a stopReason=error message when the provider rejects the
+    request (e.g. 401). Without explicit detection this looked like an
+    "empty turn" and triggered the missing-output retry, masking the real
+    failure. The orchestrator should now raise immediately.
+    """
+    phase = "phase2"
+    work_dir = _setup_work_dir(tmp_path, phase)
+
+    error_stream = (
+        '{"type": "session"}\n'
+        '{"type": "agent_start"}\n'
+        '{"type": "turn_start"}\n'
+        '{"type": "message_start", "message": {"role": "user"}}\n'
+        '{"type": "message_end", "message": {"role": "user"}}\n'
+        '{"type": "message_start", "message": {"role": "assistant"}}\n'
+        '{"type": "message_end", "message": {"role": "assistant", '
+        '"stopReason": "error", "errorMessage": "401 Missing Authentication header"}}\n'
+        '{"type": "turn_end"}\n'
+        '{"type": "agent_end"}\n'
+    )
+
+    state = {"calls": 0}
+    captured: list[tuple[tuple, dict]] = []
+
+    def side_effect(*args, **kwargs):
+        state["calls"] += 1
+        captured.append((args, kwargs))
+        return _FakePopen(returncode=0, stdout_text=error_stream)
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect)
+
+    with tripwire:
+        with pytest.raises(PiInvocationError) as exc_info:
+            invoke_pi_phase_with_retry(phase, work_dir)
+
+    # Single call — no retry on provider error.
+    assert state["calls"] == 1
+    msg = str(exc_info.value)
+    assert "provider error" in msg
+    assert "401 Missing Authentication header" in msg
+
+    args, kwargs = captured[0]
+    run_mock.assert_call(args=args, kwargs=kwargs)
+
+
 def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
     """invoke_pi_phase (the unguarded variant) does not check files."""
     phase = "phase2"
