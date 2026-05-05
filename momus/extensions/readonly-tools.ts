@@ -21,6 +21,7 @@
 
 import { spawn } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   readFileSync,
   readdirSync,
@@ -150,6 +151,40 @@ function toolError(reason: ErrorReason, path: string) {
   };
 }
 
+/**
+ * Emit one JSONL record per tool call when MOMUS_TOOLCALL_LOG is set.
+ *
+ * Schema (per design §W1 "Tool-call layer"):
+ *   { phase, tool, params, resolved_path, error, ts }
+ *
+ * No-op when the env var is unset. Failures while writing the log MUST
+ * NOT propagate — the corpus harness only needs best-effort
+ * instrumentation; a permission denied (etc.) would otherwise tank a
+ * legitimate tool call.
+ */
+export function logToolcall(
+  tool: string,
+  params: unknown,
+  resolved: string | null,
+  error: string | null,
+): void {
+  const path = process.env.MOMUS_TOOLCALL_LOG;
+  if (!path) return;
+  const record = {
+    phase: process.env.MOMUS_PHASE ?? null,
+    tool,
+    params,
+    resolved_path: resolved,
+    error,
+    ts: new Date().toISOString(),
+  };
+  try {
+    appendFileSync(path, JSON.stringify(record) + "\n", "utf8");
+  } catch {
+    // best-effort; do not break the tool call
+  }
+}
+
 export interface ReadRepoParams {
   path: string;
   offset?: number;
@@ -168,15 +203,25 @@ export async function executeReadRepo(
   cwd: string,
 ): Promise<any> {
   const check = ensureWithinCwd(params.path, cwd);
-  if (!check.ok) return toolError(check.reason, params.path);
-  if (!existsSync(check.resolved)) return toolError("NotFound", params.path);
+  if (!check.ok) {
+    logToolcall("read_repo", params, null, check.reason);
+    return toolError(check.reason, params.path);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("read_repo", params, null, "NotFound");
+    return toolError("NotFound", params.path);
+  }
   const stat = statSync(check.resolved);
-  if (stat.size > MAX_READ_BYTES) return toolError("TooLarge", params.path);
+  if (stat.size > MAX_READ_BYTES) {
+    logToolcall("read_repo", params, check.resolved, "TooLarge");
+    return toolError("TooLarge", params.path);
+  }
   const content = readFileSync(check.resolved, "utf8");
   const lines = content.split("\n");
   const offset = params.offset ?? 0;
   const limit = params.limit ?? lines.length;
   const slice = lines.slice(offset, offset + limit).join("\n");
+  logToolcall("read_repo", params, check.resolved, null);
   return {
     content: [{ type: "text", text: slice }],
     details: { lines_total: lines.length, resolved_path: check.resolved },
@@ -209,16 +254,24 @@ export async function executeGrepRepo(
   cwd: string,
 ): Promise<any> {
   if (typeof params.pattern !== "string" || params.pattern.length === 0) {
+    logToolcall("grep_repo", params, null, "InvalidArgument");
     return toolError("InvalidArgument", "<pattern>");
   }
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
-  if (!check.ok) return toolError(check.reason, root);
-  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  if (!check.ok) {
+    logToolcall("grep_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("grep_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
   let re: RegExp;
   try {
     re = new RegExp(params.pattern, params["-i"] ? "i" : "");
   } catch {
+    logToolcall("grep_repo", params, check.resolved, "InvalidArgument");
     return toolError("InvalidArgument", "<pattern>");
   }
   const matches: Array<{ file: string; line: number; text: string }> = [];
@@ -274,6 +327,7 @@ export async function executeGrepRepo(
     }
   };
   visit(check.resolved);
+  logToolcall("grep_repo", params, check.resolved, null);
   return {
     content: [
       {
@@ -304,8 +358,14 @@ export async function executeFindRepo(
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
-  if (!check.ok) return toolError(check.reason, root);
-  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  if (!check.ok) {
+    logToolcall("find_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("find_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
   // Glob -> RegExp translation: `*` -> `[^/]*`, `?` -> `.`, escape rest.
   const nameRe = params.name
     ? new RegExp(
@@ -360,6 +420,7 @@ export async function executeFindRepo(
     }
   };
   visit(check.resolved);
+  logToolcall("find_repo", params, check.resolved, null);
   return {
     content: [{ type: "text", text: out.slice(0, 500).join("\n") }],
     details: { results: out, truncated, resolved_path: check.resolved },
@@ -379,16 +440,24 @@ export async function executeLsRepo(
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
-  if (!check.ok) return toolError(check.reason, root);
-  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  if (!check.ok) {
+    logToolcall("ls_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("ls_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
   const st = statSync(check.resolved);
   if (!st.isDirectory()) {
+    logToolcall("ls_repo", params, check.resolved, "InvalidArgument");
     return toolError("InvalidArgument", root);
   }
   let names: string[];
   try {
     names = readdirSync(check.resolved);
   } catch {
+    logToolcall("ls_repo", params, check.resolved, "NotFound");
     return toolError("NotFound", root);
   }
   const entries: Array<{ name: string; type: string }> = [];
@@ -407,6 +476,7 @@ export async function executeLsRepo(
     else if (cst.isSymbolicLink()) type = "symlink";
     entries.push({ name: n, type });
   }
+  logToolcall("ls_repo", params, check.resolved, null);
   return {
     content: [
       {

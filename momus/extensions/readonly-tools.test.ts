@@ -749,6 +749,62 @@ describe("checkGitArgv", () => {
     expect(r.ok).toBe(true);
   });
 
+  test("toolcall_log_appends_one_line_per_call_when_env_set", async () => {
+    const cwd = makeCwd();
+    const logPath = join(cwd, "calls.jsonl");
+    process.env.MOMUS_TOOLCALL_LOG = logPath;
+    try {
+      writeFileSync(join(cwd, "a.txt"), "x\n");
+      await executeReadRepo({ path: "a.txt" }, cwd);
+      await executeReadRepo({ path: "/etc/passwd" }, cwd);
+    } finally {
+      delete process.env.MOMUS_TOOLCALL_LOG;
+    }
+    const lines = require("node:fs")
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n");
+    expect(lines.length).toBe(2);
+    const first = JSON.parse(lines[0]);
+    expect(first.tool).toBe("read_repo");
+    expect(first.params.path).toBe("a.txt");
+    expect(first.error).toBe(null);
+    expect(first.resolved_path).toContain(cwd);
+    expect(typeof first.ts).toBe("string");
+    const second = JSON.parse(lines[1]);
+    expect(second.tool).toBe("read_repo");
+    expect(second.error).toBe("OutsideRepo");
+    expect(second.resolved_path).toBe(null);
+  });
+
+  test("toolcall_log_skipped_when_env_unset", async () => {
+    const cwd = makeCwd();
+    delete process.env.MOMUS_TOOLCALL_LOG;
+    writeFileSync(join(cwd, "b.txt"), "y\n");
+    // Should not throw and not write anything anywhere.
+    const r = await executeReadRepo({ path: "b.txt" }, cwd);
+    expect(r.isError).toBeUndefined();
+  });
+
+  test("toolcall_log_includes_resolved_path_for_read_repo", async () => {
+    const cwd = makeCwd();
+    const logPath = join(cwd, "calls2.jsonl");
+    process.env.MOMUS_TOOLCALL_LOG = logPath;
+    try {
+      writeFileSync(join(cwd, "c.txt"), "z\n");
+      await executeReadRepo({ path: "c.txt" }, cwd);
+    } finally {
+      delete process.env.MOMUS_TOOLCALL_LOG;
+    }
+    const line = require("node:fs")
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")[0];
+    const ev = JSON.parse(line);
+    expect(ev.resolved_path).toContain(cwd);
+    expect(ev.resolved_path.endsWith("c.txt")).toBe(true);
+  });
+
   test("git_show_two_ref_path_tokens_rejected_AmbiguousShowArgv", () => {
     const cwd = makeCwd();
     const r = checkGitArgv(
