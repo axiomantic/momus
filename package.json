@@ -1,0 +1,8 @@
+{
+  "name": "momus-extension",
+  "private": true,
+  "description": "Pinned npm deps for the momus pi-coding-agent extension. Installed via `npm ci` in action.yml so the pi binary version is deterministic across action runs.",
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "0.72.1"
+  }
+}

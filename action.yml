@@ -16,16 +16,21 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
+    - name: Setup Node
+      uses: actions/setup-node@v4
       with:
-        bun-version: latest
+        node-version: "20"
 
-    - name: Install pi-coding-agent
+    - name: Install pi-coding-agent (pinned via package-lock.json)
       shell: bash
+      working-directory: ${{ github.action_path }}
       run: |
-        bun install -g @mariozechner/pi-coding-agent
-        pi --version
+        # `npm ci` resolves @mariozechner/pi-coding-agent at exactly the
+        # version recorded in package-lock.json (0.72.1), making the
+        # action's behavior deterministic across runs. The pi binary is
+        # available at ./node_modules/.bin/pi inside the action checkout.
+        npm ci --no-audit --no-fund
+        ./node_modules/.bin/pi --version
 
     - name: Setup Python
       uses: actions/setup-python@v5
@@ -47,6 +52,9 @@ runs:
         # LLM_API_KEY / LLM_BASE_URL / LLM_MODEL are also expected to be set as
         # env on the calling `uses:` step. We never echo these.
         GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # Make the locally-installed pi binary visible to momus.invoke_pi
+        # (which spawns `pi` from PATH).
+        PATH: ${{ github.action_path }}/node_modules/.bin:${{ env.PATH }}
       run: |
         OWNER="${GITHUB_REPOSITORY%%/*}"
         REPO="${GITHUB_REPOSITORY#*/}"
