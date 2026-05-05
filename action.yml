@@ -1,4 +1,4 @@
-name: "Momus"
+name: "Momus Code Review"
 description: "Run pi-coding-agent against a PR diff and publish a GitHub Review."
 
 inputs:

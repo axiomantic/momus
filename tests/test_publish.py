@@ -178,15 +178,14 @@ def test_bot_token_approve_downgrades_to_comment():
     )
 
 
-def test_token_lookup_failure_outside_ci_does_not_downgrade(
-    capsys, monkeypatch
-):
-    """Outside Actions, an unknown token defers to GitHub: leave APPROVE alone."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
-
+def test_opaque_installation_token_sends_approve_unchanged():
+    """Installation tokens (default or custom App) make `gh api /user` 4xx,
+    so `_get_token_user_info` returns None and `_approve_downgrade_reason`
+    cannot decide. APPROVE goes through to GitHub; `_submit_review`'s 422
+    handler covers the default-token case.
+    """
     cfg = _minimal_config()
-    pr_meta = _pr_meta(author="elijahr")
+    pr_meta = _pr_meta(author="some-human")
     findings = _findings_doc(verdict="APPROVE")
 
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
@@ -212,86 +211,121 @@ def test_token_lookup_failure_outside_ci_does_not_downgrade(
         ),
         kwargs={},
     )
-    assert capsys.readouterr().err == ""
 
 
-def test_default_github_token_in_actions_downgrades(monkeypatch):
-    """Inside Actions with no custom App configured, downgrade APPROVE.
-
-    The default `GITHUB_TOKEN` (a `github-actions` App installation token)
-    cannot APPROVE — GitHub rejects approvals from that user. The workflow
-    signals "no custom App" by leaving `MOMUS_USING_APP_TOKEN` unset.
+def test_422_app_cannot_approve_retries_as_comment_with_note():
+    """Default Actions GITHUB_TOKEN: GitHub returns 422 saying installations
+    must use COMMENT/REQUEST_CHANGES. Retry with event=COMMENT, prepended
+    downgrade note, AND the original inline comments preserved.
     """
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
-
-    cfg = _minimal_config()
-    pr_meta = _pr_meta(author="some-human")
-    findings = _findings_doc(verdict="APPROVE")
-
+    err = publish_mod._GhApiError(
+        422,
+        "HTTP 422: Validation Failed: GitHub Apps must use one of the events "
+        "`COMMENT` or `REQUEST_CHANGES`",
+    )
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
-    gh_api.returns({})
-    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
-    user_info.returns(None)
+    gh_api.raises(err).returns({})
 
+    inline = [{"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}]
     with tripwire:
-        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+        publish_mod._submit_review(
+            owner="elijahr",
+            repo="lockfreequeues",
+            pr_number=25,
+            head_sha="abc",
+            body="original body",
+            inline_comments=inline,
+            event="APPROVE",
+        )
 
-    expected_note = (
+    from dirty_equals import IsInstance
+
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": "original body",
+                "event": "APPROVE",
+                "comments": inline,
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
+    expected_retry_body = (
         "_Note: verdict was APPROVE but downgraded to COMMENT because the "
         "default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; "
-        "see SETUP.md)._\n\n"
+        "see SETUP.md)._\n\noriginal body"
     )
-    expected_body = expected_note + _expected_rendered_body(
-        findings, run_url="https://run/1"
-    )
-    user_info.assert_call(args=(), kwargs={})
     gh_api.assert_call(
         args=(
             "POST",
             _reviews_endpoint(),
             {
-                "commit_id": pr_meta["head_sha"],
-                "body": expected_body,
+                "commit_id": "abc",
+                "body": expected_retry_body,
                 "event": "COMMENT",
-                "comments": [],
+                "comments": inline,
             },
         ),
         kwargs={},
     )
 
 
-def test_custom_app_token_in_actions_does_not_downgrade(monkeypatch):
-    """Inside Actions with a custom GitHub App token, allow APPROVE through.
-
-    The workflow's detect-app step sets `MOMUS_USING_APP_TOKEN=true` when the
-    user has configured an App. App installation tokens may APPROVE PRs.
+def test_422_cannot_approve_apps_phrasing_also_retries():
+    """Liberal matcher: any 422 mentioning "cannot approve" alongside an
+    Apps/installation hint should also trigger the COMMENT retry. Guards
+    against GitHub rephrasing the error in the future.
     """
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("MOMUS_USING_APP_TOKEN", "true")
-
-    cfg = _minimal_config()
-    pr_meta = _pr_meta(author="some-human")
-    findings = _findings_doc(verdict="APPROVE")
-
+    err = publish_mod._GhApiError(
+        422,
+        "HTTP 422: GitHub Apps cannot approve their own pull request",
+    )
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
-    gh_api.returns({})
-    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
-    user_info.returns(None)
+    gh_api.raises(err).returns({})
 
     with tripwire:
-        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+        publish_mod._submit_review(
+            owner="elijahr",
+            repo="lockfreequeues",
+            pr_number=25,
+            head_sha="abc",
+            body="b",
+            inline_comments=[],
+            event="APPROVE",
+        )
 
-    expected_body = _expected_rendered_body(findings, run_url="https://run/1")
-    user_info.assert_call(args=(), kwargs={})
+    from dirty_equals import IsInstance
+
     gh_api.assert_call(
         args=(
             "POST",
             _reviews_endpoint(),
             {
-                "commit_id": pr_meta["head_sha"],
-                "body": expected_body,
+                "commit_id": "abc",
+                "body": "b",
                 "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
+    expected_retry_body = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because the "
+        "default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; "
+        "see SETUP.md)._\n\nb"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": expected_retry_body,
+                "event": "COMMENT",
                 "comments": [],
             },
         ),
