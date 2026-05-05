@@ -1,0 +1,8 @@
+{
+  "owner": "test",
+  "repo": "momus-corpus",
+  "pr_number": 106,
+  "head_sha": "g4deadbeef000000000000000000000000000000",
+  "title": "Add normalize_whitespace and title_case helpers",
+  "author": "human-author"
+}
