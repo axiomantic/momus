@@ -2,27 +2,50 @@
 
 from __future__ import annotations
 
+import logging
+import uuid
 from pathlib import Path
 
 from .config import Config
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
+log = logging.getLogger(__name__)
+
+_BEGIN_FENCE = "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON"
+_END_FENCE = "END_UNTRUSTED_PRIOR_THREADS_JSON"
+_PRIOR_THREADS_PLACEHOLDER = "<<UNTRUSTED_PRIOR_THREADS_JSON>>"
+
 
 def render_phase_prompt(
-    phase: str, config: Config, run_id: str, work_dir_rel: Path
+    phase: str,
+    config: Config,
+    run_id: str,
+    work_dir_rel: Path,
+    work_dir: Path | None = None,
 ) -> str:
     """Render the phase prompt for ``phase`` (one of: phase1, phase2, phase3).
 
     ``work_dir_rel`` is the work_dir's path relative to repo_root, used
     to substitute ``<<WORK_DIR>>`` so prompts can reference inputs/outputs
     via the path the model must use from pi's CWD (= repo_root).
+
+    ``work_dir`` is the absolute work_dir path. When the prompt template
+    contains ``<<UNTRUSTED_PRIOR_THREADS_JSON>>``, the contents of
+    ``work_dir/inputs/prior-threads.json`` are inlined verbatim between
+    BEGIN/END fence markers. If the file is missing or ``work_dir`` is
+    ``None``, an empty JSON array (``[]``) is substituted and a warning
+    is logged. If the file body itself contains a fence marker, both
+    BEGIN and END are suffixed with a matching UUID so the wrapping
+    remains unambiguous.
     """
     template = (PROMPTS_DIR / f"{phase}-{_phase_suffix(phase)}.md").read_text(encoding="utf-8")
     substitutions = _substitutions(config, run_id, work_dir_rel)
     rendered = template
     for key, value in substitutions.items():
         rendered = rendered.replace(f"<<{key}>>", value)
+    if _PRIOR_THREADS_PLACEHOLDER in rendered:
+        rendered = _substitute_prior_threads(rendered, work_dir)
     leftover = _find_unsubstituted(rendered)
     if leftover:
         raise ValueError(
@@ -30,6 +53,38 @@ def render_phase_prompt(
             f"Add them to render._substitutions or remove from the prompt."
         )
     return rendered
+
+
+def _substitute_prior_threads(rendered: str, work_dir: Path | None) -> str:
+    """Replace ``<<UNTRUSTED_PRIOR_THREADS_JSON>>`` with fenced contents
+    of ``work_dir/inputs/prior-threads.json``. Robust to missing file
+    and to fence-marker collisions inside the body (UUID-suffixed fences).
+    """
+    if work_dir is None:
+        log.warning(
+            "render: work_dir not provided; substituting empty array for "
+            "<<UNTRUSTED_PRIOR_THREADS_JSON>>"
+        )
+        body = "[]"
+    else:
+        path = work_dir / "inputs" / "prior-threads.json"
+        if path.exists():
+            body = path.read_text(encoding="utf-8")
+        else:
+            log.warning(
+                "render: %s missing; substituting empty array for "
+                "<<UNTRUSTED_PRIOR_THREADS_JSON>>",
+                path,
+            )
+            body = "[]"
+    if _BEGIN_FENCE in body or _END_FENCE in body:
+        sfx = uuid.uuid4()
+        begin = f"{_BEGIN_FENCE}_{sfx}"
+        end = f"{_END_FENCE}_{sfx}"
+    else:
+        begin, end = _BEGIN_FENCE, _END_FENCE
+    fenced = f"{begin}\n{body}\n{end}"
+    return rendered.replace(_PRIOR_THREADS_PLACEHOLDER, fenced)
 
 
 def _phase_suffix(phase: str) -> str:

@@ -1,7 +1,11 @@
-"""Unit tests for momus.render — wire-format key naming."""
+"""Unit tests for momus.render — wire-format key naming and
+UNTRUSTED_PRIOR_THREADS_JSON path-loaded substitution.
+"""
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +21,20 @@ def _make_work_dir(tmp_path: Path, _files: list[str]) -> Path:
     work_dir = tmp_path / ".work"
     (work_dir / "inputs").mkdir(parents=True, exist_ok=True)
     (work_dir / "outputs").mkdir(parents=True, exist_ok=True)
+    return work_dir
+
+
+def _make_work_dir_with_threads(tmp_path: Path, threads: list | None) -> Path:
+    """Create work_dir with optional inputs/prior-threads.json.
+
+    If ``threads`` is None, no prior-threads.json file is written.
+    Otherwise the list is JSON-encoded and written to that path.
+    """
+    work_dir = tmp_path / "work"
+    inputs = work_dir / "inputs"
+    inputs.mkdir(parents=True)
+    if threads is not None:
+        (inputs / "prior-threads.json").write_text(json.dumps(threads))
     return work_dir
 
 
@@ -54,3 +72,98 @@ def test_phase3_verify_prompt_uses_unprefixed_calibration_key():
             "momus" / "prompts" / "phase3-verify.md").read_text()
     assert "_calibration" not in text
     assert "calibration" in text
+
+
+# --- W0-Render: <<UNTRUSTED_PRIOR_THREADS_JSON>> path-loaded substitution ---
+
+
+@pytest.fixture
+def patched_phase1_prompt(tmp_path, monkeypatch):
+    """Install a minimal phase1-plan.md template under a tmp PROMPTS_DIR
+    that contains the new placeholder. The W0-Phase1Prompt task will add
+    the placeholder to the production template; W0-Render only requires
+    that ``render_phase_prompt`` substitutes it correctly when present.
+    """
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    template = (
+        "Phase 1\n"
+        "WORK_DIR=<<WORK_DIR>>\n"
+        "PRIOR_THREADS:\n"
+        "<<UNTRUSTED_PRIOR_THREADS_JSON>>\n"
+    )
+    (prompts_dir / "phase1-plan.md").write_text(template)
+    import momus.render as render_mod
+    monkeypatch.setattr(render_mod, "PROMPTS_DIR", prompts_dir)
+    return prompts_dir
+
+
+def test_render_substitutes_prior_threads_placeholder(
+    tmp_path, cfg, patched_phase1_prompt
+):
+    work_dir = _make_work_dir_with_threads(
+        tmp_path, [{"id": "t1", "body": "fenced data"}]
+    )
+    rendered = render_phase_prompt(
+        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
+    )
+    assert "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
+    assert "END_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
+    assert '"id": "t1"' in rendered
+    assert "<<UNTRUSTED_PRIOR_THREADS_JSON>>" not in rendered
+
+
+def test_render_handles_missing_prior_threads_file(
+    tmp_path, cfg, caplog, patched_phase1_prompt
+):
+    work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
+    rendered = render_phase_prompt(
+        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
+    )
+    assert (
+        "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n[]\nEND_UNTRUSTED_PRIOR_THREADS_JSON"
+        in rendered
+    )
+
+
+def test_render_does_not_double_escape_json(
+    tmp_path, cfg, patched_phase1_prompt
+):
+    raw = '[{"body": "a\\nb"}]'
+    work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
+    (work_dir / "inputs" / "prior-threads.json").write_text(raw)
+    rendered = render_phase_prompt(
+        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
+    )
+    assert (
+        f"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n{raw}\nEND_UNTRUSTED_PRIOR_THREADS_JSON"
+        in rendered
+    )
+
+
+def test_render_preserves_other_placeholders(
+    tmp_path, cfg, patched_phase1_prompt
+):
+    work_dir = _make_work_dir_with_threads(tmp_path, [])
+    rendered = render_phase_prompt(
+        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
+    )
+    assert ".work" in rendered
+    assert "<<WORK_DIR>>" not in rendered
+
+
+def test_render_fence_collision_uses_uuid_suffix(
+    tmp_path, cfg, patched_phase1_prompt
+):
+    poison = '[{"body": "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON inside"}]'
+    work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
+    (work_dir / "inputs" / "prior-threads.json").write_text(poison)
+    rendered = render_phase_prompt(
+        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
+    )
+    matches = re.findall(
+        r"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON_([0-9a-f-]{36})", rendered
+    )
+    assert len(matches) == 1
+    suffix = matches[0]
+    assert f"END_UNTRUSTED_PRIOR_THREADS_JSON_{suffix}" in rendered

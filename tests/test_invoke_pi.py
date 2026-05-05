@@ -430,3 +430,67 @@ def test_log_event_lifecycle_events_pass_through(
     assert "[momus.pi phase2] agent_start model=deepseek/v4" in out
     out = _capture_log({"type": "compaction_start", "reason": "threshold"}, capsys)
     assert "[momus.pi phase2] compaction_start reason=threshold" in out
+
+
+def test_render_phase_prompt_called_with_work_dir_for_phase1(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Phase 1 invocations of ``render_phase_prompt`` must pass the
+    absolute ``work_dir`` as a kwarg so the path-loaded
+    ``<<UNTRUSTED_PRIOR_THREADS_JSON>>`` placeholder can fence the file
+    contents. Other phases pass ``work_dir=None`` (default).
+    """
+    from momus import prep as prep_mod
+    from momus.config import load_config
+    from momus.prep import prep_inputs
+
+    captured: list[dict] = []
+
+    def fake_render(phase, config, run_id, work_dir_rel, work_dir=None):
+        captured.append(
+            {
+                "phase": phase,
+                "run_id": run_id,
+                "work_dir_rel": work_dir_rel,
+                "work_dir": work_dir,
+            }
+        )
+        return f"rendered:{phase}"
+
+    monkeypatch.setattr(prep_mod, "render_phase_prompt", fake_render)
+
+    # Stub git invocations: prep_inputs shells out to `git diff`.
+    class _Proc:
+        def __init__(self, stdout: str = "") -> None:
+            self.stdout = stdout
+
+    def fake_run(cmd, **kwargs):
+        return _Proc(stdout="")
+
+    monkeypatch.setattr(prep_mod.subprocess, "run", fake_run)
+
+    repo_root = tmp_path
+    work_dir = repo_root / ".work"
+    work_dir.mkdir()
+    work_dir_rel = work_dir.relative_to(repo_root)
+
+    pr_meta = {
+        "base_sha": "deadbeef",
+        "head_sha": "cafebabe",
+        "run_id": "A",
+        "pr_number": 1,
+        "owner": "x",
+        "repo": "y",
+    }
+    config = load_config(repo_root)
+
+    prep_inputs(repo_root, work_dir, work_dir_rel, pr_meta, config)
+
+    expected_phases = ["phase1", "phase2", "phase3"]
+    assert [c["phase"] for c in captured] == expected_phases
+    by_phase = {c["phase"]: c for c in captured}
+    assert by_phase["phase1"]["work_dir"] == work_dir
+    assert by_phase["phase2"]["work_dir"] is None
+    assert by_phase["phase3"]["work_dir"] is None
+    assert by_phase["phase1"]["work_dir_rel"] == work_dir_rel
+    assert by_phase["phase1"]["run_id"] == "A"
