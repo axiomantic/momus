@@ -8,6 +8,7 @@ version = "1.0.0"
 description = "Multi-phase AI pull-request review."
 requires-python = ">=3.11"
 dependencies = [
+    "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
 
