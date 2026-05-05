@@ -124,6 +124,7 @@ def test_render_handles_missing_prior_threads_file(
         "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n[]\nEND_UNTRUSTED_PRIOR_THREADS_JSON"
         in rendered
     )
+    assert any("missing" in r.message for r in caplog.records)
 
 
 def test_render_does_not_double_escape_json(

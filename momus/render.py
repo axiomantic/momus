@@ -22,6 +22,7 @@ def render_phase_prompt(
     config: Config,
     run_id: str,
     work_dir_rel: Path,
+    *,
     work_dir: Path | None = None,
 ) -> str:
     """Render the phase prompt for ``phase`` (one of: phase1, phase2, phase3).
