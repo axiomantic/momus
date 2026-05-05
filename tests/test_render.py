@@ -167,3 +167,10 @@ def test_render_fence_collision_uses_uuid_suffix(
     assert len(matches) == 1
     suffix = matches[0]
     assert f"END_UNTRUSTED_PRIOR_THREADS_JSON_{suffix}" in rendered
+
+
+def test_phase1_prompt_no_path_reference_remaining():
+    text = (Path(__file__).resolve().parent.parent /
+            "momus" / "prompts" / "phase1-plan.md").read_text()
+    assert "<<UNTRUSTED_PRIOR_THREADS_JSON>>" in text
+    assert "<<WORK_DIR>>/inputs/prior-threads.json" not in text
