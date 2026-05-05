@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,57 @@ from typing import Any
 from .config import Config
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "nit"]
+
+
+# ---------------------------------------------------------------------------
+# W5-Redaction: scrub credential-shaped strings + off-domain images
+# ---------------------------------------------------------------------------
+#
+# Applied to every LLM-emitted publish-bound string (summary, finding
+# title/message/suggestion, noteworthy entries) inside render_review_body
+# and _finding_inline_body. Centralizing redaction at construction time
+# means the 422-retry branches in _submit_review automatically inherit
+# redaction without re-applying it to already-redacted strings.
+#
+# Token patterns: high-confidence prefix + length combinations only.
+# Anything looser would burn legitimate review prose (`sk_buffer`,
+# `AKIATooShort`, etc.).
+#
+# Off-domain image stripping: defends against the CamoLeak class of
+# exfiltration where an attacker-shaped finding embeds an `![](evil.com)`
+# whose URL path encodes data; GitHub camo-fetches the image and the
+# attacker's server logs the request. github.com and
+# user-images.githubusercontent.com are the only domains we allow because
+# (a) they're GitHub's own image hosts and (b) requests to them are
+# already traceable in GitHub's audit log.
+TOKEN_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bghp_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bgho_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghu_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghs_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghr_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9]{48,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+]
+
+OFF_DOMAIN_IMG_RE = re.compile(
+    r"!\[[^\]]*\]\((?!https?://github\.com|https?://user-images\.githubusercontent\.com)[^)]+\)"
+)
+
+
+def redact_for_publish(text: str) -> tuple[str, int]:
+    """Return (redacted_text, n_redactions) for a publisher-bound string.
+
+    n_redactions counts only credential-token replacements; off-domain
+    image strips are not counted (they're a separate exfiltration class
+    and the caller logs them separately).
+    """
+    n = 0
+    for pat in TOKEN_PATTERNS:
+        text, k = pat.subn("[redacted]", text)
+        n += k
+    text = OFF_DOMAIN_IMG_RE.sub("[image stripped: off-domain]", text)
+    return text, n
 SEVERITY_LABELS = {
     "critical": "Critical",
     "high": "High",
