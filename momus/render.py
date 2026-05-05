@@ -9,10 +9,17 @@ from .config import Config
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
 
-def render_phase_prompt(phase: str, config: Config, run_id: str) -> str:
-    """Render the phase prompt for ``phase`` (one of: phase1, phase2, phase3)."""
+def render_phase_prompt(
+    phase: str, config: Config, run_id: str, work_dir_rel: Path
+) -> str:
+    """Render the phase prompt for ``phase`` (one of: phase1, phase2, phase3).
+
+    ``work_dir_rel`` is the work_dir's path relative to repo_root, used
+    to substitute ``<<WORK_DIR>>`` so prompts can reference inputs/outputs
+    via the path the model must use from pi's CWD (= repo_root).
+    """
     template = (PROMPTS_DIR / f"{phase}-{_phase_suffix(phase)}.md").read_text(encoding="utf-8")
-    substitutions = _substitutions(config, run_id)
+    substitutions = _substitutions(config, run_id, work_dir_rel)
     rendered = template
     for key, value in substitutions.items():
         rendered = rendered.replace(f"<<{key}>>", value)
@@ -29,7 +36,7 @@ def _phase_suffix(phase: str) -> str:
     return {"phase1": "plan", "phase2": "review", "phase3": "verify"}[phase]
 
 
-def _substitutions(config: Config, run_id: str) -> dict[str, str]:
+def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str, str]:
     review = config.review
     blocking = review.blocking_severities
     blocking_str = ", ".join(f"`{s}`" for s in blocking)
@@ -119,6 +126,7 @@ def _substitutions(config: Config, run_id: str) -> dict[str, str]:
         )
 
     return {
+        "WORK_DIR": str(work_dir_rel),
         "REPO_EMPHASIS": review.repo_emphasis or "(none configured for this repo)",
         "CALIBRATION_PROCEDURE": calibration_procedure,
         "BLOCKING_SEVERITIES": blocking_str,

@@ -13,7 +13,7 @@ A review with two real issues beats a review with twenty noise items.
 ## Output contract
 
 You MUST end this turn by invoking `write_output` to write
-`outputs/findings.json`. Producing review prose in the chat is not
+`<<WORK_DIR>>/outputs/findings.json`. Producing review prose in the chat is not
 sufficient — without the `write_output` call, the entire pipeline
 fails.
 
@@ -35,16 +35,19 @@ optional. Use this exact shape:
 
 Available in the working directory:
 
-- `inputs/diff.patch` — unified diff of all changes vs the merge base.
-- `inputs/changed-files.txt` — list of changed file paths, one per line.
-- `inputs/conventions.md` — concatenated repo convention docs. May be
+- `<<WORK_DIR>>/inputs/diff.patch` — unified diff of all changes vs the merge base.
+- `<<WORK_DIR>>/inputs/changed-files.txt` — list of changed file paths, one per line.
+- `<<WORK_DIR>>/inputs/conventions.md` — concatenated repo convention docs. May be
   empty.
-- `inputs/prior-findings.json` — findings from previous bot reviews of
+- `<<WORK_DIR>>/inputs/prior-findings.json` — findings from previous bot reviews of
   this PR, classified `PENDING / DECLINED / PARTIAL_AGREEMENT /
   ALTERNATIVE_PROPOSED / ANSWERED`. Empty array on first review.
-- `inputs/pr-meta.json` — PR title, body, author, base/head SHA, run id.
+- `<<WORK_DIR>>/inputs/pr-meta.json` — PR title, body, author, base/head SHA, run id.
 
-The repository is checked out at the PR head SHA in the working directory.
+The repository checkout at the PR head SHA is your working directory.
+Read repo files via plain relative paths (e.g. `src/foo.rs`). The
+inputs listed above live under `<<WORK_DIR>>/inputs/` from CWD; the
+outputs you write go under `<<WORK_DIR>>/outputs/`.
 
 ## Tools
 
@@ -62,11 +65,11 @@ The repository is checked out at the PR head SHA in the working directory.
 
 ## Procedure
 
-1. Read `inputs/conventions.md` first. Repo conventions override any
+1. Read `<<WORK_DIR>>/inputs/conventions.md` first. Repo conventions override any
    defaults in this prompt that contradict them. Note the constraints
    that apply during review.
 
-2. Read `inputs/diff.patch` end to end. Build a mental model of what the
+2. Read `<<WORK_DIR>>/inputs/diff.patch` end to end. Build a mental model of what the
    PR is trying to do.
 
 3. For each substantive change, investigate before forming a finding:
@@ -77,7 +80,7 @@ The repository is checked out at the PR head SHA in the working directory.
      don't actually cover the new code are themselves a finding.
    - Verify any claim in the PR title or body against the actual diff.
 
-4. Apply `inputs/prior-findings.json` discipline:
+4. Apply `<<WORK_DIR>>/inputs/prior-findings.json` discipline:
    - For each `PENDING` prior finding, determine whether the new commit
      fixes it. Record the answer in `prior_findings_status`. If still
      present, carry it forward as a current finding using its existing ID.
@@ -142,7 +145,7 @@ substantive findings, prioritize by severity and surface the rest in
 `summary` as "additional concerns not enumerated."
 
 Before ending your turn, you MUST invoke `write_output` to write
-exactly one file: `outputs/findings.json`. This write is mandatory on
+exactly one file: `<<WORK_DIR>>/outputs/findings.json`. This write is mandatory on
 every run, including no-findings runs (use the empty-case template
 shown in the Output contract above). Strict shape:
 
@@ -189,7 +192,7 @@ shown in the Output contract above). Strict shape:
 
 ## Output checklist (required)
 
-- [ ] `outputs/findings.json` written via `write_output`
+- [ ] `<<WORK_DIR>>/outputs/findings.json` written via `write_output`
 
 This write is mandatory on every run. Do not finish until it has been
 emitted.
