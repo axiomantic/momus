@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .findings_schema import Finding, FindingsDoc
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "nit"]
 
@@ -78,12 +79,22 @@ class PublishError(RuntimeError):
 
 
 def publish(
-    findings_doc: dict[str, Any],
+    findings_doc: FindingsDoc | dict[str, Any],
     priors: list[dict[str, Any]],
     pr_meta: dict[str, Any],
     config: Config,
     run_url: str,
 ) -> None:
+    """Publish a validated FindingsDoc to GitHub.
+
+    Post-W5: the typed shape is `FindingsDoc`. The orchestrator
+    (`__main__._read_findings_doc`) validates before calling. Dict input
+    is accepted for legacy test callers that build payloads inline; it
+    runs through the same `FindingsDoc.model_validate` so the eventual
+    publish-bound state is identical regardless of entry point.
+    """
+    if not isinstance(findings_doc, FindingsDoc):
+        findings_doc = FindingsDoc.model_validate(findings_doc)
     owner = pr_meta["owner"]
     repo = pr_meta["repo"]
     pr_number = pr_meta["pr_number"]
@@ -91,8 +102,8 @@ def publish(
     run_id = pr_meta.get("run_id", "A")
 
     body = render_review_body(findings_doc, run_url, run_id, config)
-    inline_comments = build_inline_comments(findings_doc.get("findings", []), run_url, run_id)
-    event = findings_doc.get("verdict", "COMMENT")
+    inline_comments = build_inline_comments(findings_doc.findings, run_url, run_id)
+    event = findings_doc.verdict
 
     # Pre-emptive downgrade for cases we can decide from the token's user
     # info alone: self-approval (token user == PR author) and Bot-typed
@@ -121,23 +132,42 @@ def publish(
         repo=repo,
         pr_number=pr_number,
         priors=priors,
-        prior_status=findings_doc.get("prior_findings_status", []),
+        prior_status=[
+            p.model_dump() for p in findings_doc.prior_findings_status
+        ],
         head_sha=head_sha,
         run_url=run_url,
     )
 
 
 def render_review_body(
-    findings_doc: dict[str, Any],
+    findings_doc: FindingsDoc | dict[str, Any],
     run_url: str,
     run_id: str,
     config: Config,
 ) -> str:
-    summary = findings_doc.get("summary", "").strip() or "(no summary)"
-    tally = findings_doc.get("tally", {})
-    findings = findings_doc.get("findings", [])
-    noteworthy = findings_doc.get("noteworthy", []) or []
-    verdict = findings_doc.get("verdict", "COMMENT")
+    """Render the markdown body. Accepts FindingsDoc (post-W5) or dict
+    (legacy callers in tests). Applies redaction to every LLM-emitted
+    string at construction time so the 422-retry branches in
+    `_submit_review` automatically inherit redaction.
+    """
+    if isinstance(findings_doc, FindingsDoc):
+        summary_raw = findings_doc.summary
+        tally = findings_doc.tally
+        findings_models = findings_doc.findings
+        findings = [f.model_dump() for f in findings_models]
+        noteworthy_raw = findings_doc.noteworthy or []
+        verdict = findings_doc.verdict
+    else:
+        summary_raw = findings_doc.get("summary", "").strip() or "(no summary)"
+        tally = findings_doc.get("tally", {})
+        findings = findings_doc.get("findings", [])
+        noteworthy_raw = findings_doc.get("noteworthy", []) or []
+        verdict = findings_doc.get("verdict", "COMMENT")
+
+    summary = summary_raw.strip() or "(no summary)"
+    summary, _ = redact_for_publish(summary)
+    noteworthy = [redact_for_publish(n)[0] for n in noteworthy_raw]
 
     parts: list[str] = [summary, "", _tally_line(tally)]
 
@@ -193,7 +223,8 @@ def _finding_one_liner(f: dict[str, Any]) -> str:
     fid = f.get("id", "BOT-?")
     file = f.get("file", "?")
     line = f.get("line", "?")
-    title = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title_raw = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title, _ = redact_for_publish(title_raw)
     return f"- **{fid}** (`{file}:{line}`): {title}"
 
 
@@ -243,22 +274,31 @@ def _commands_footer() -> str:
 
 
 def build_inline_comments(
-    findings: list[dict[str, Any]],
+    findings: list[dict[str, Any]] | list[Finding],
     run_url: str,
     run_id: str,
 ) -> list[dict[str, Any]]:
+    """Build inline-comment payloads from findings (validated models or dicts).
+
+    Accepts both the post-W5 `list[Finding]` and the pre-W5 `list[dict]`
+    so test helpers and any legacy callers that hand in dicts continue
+    to work.
+    """
     comments: list[dict[str, Any]] = []
     for f in findings:
-        body = _finding_inline_body(f, run_url, run_id)
+        f_dict: dict[str, Any] = (
+            f.model_dump() if isinstance(f, Finding) else f
+        )
+        body = _finding_inline_body(f_dict, run_url, run_id)
         comment: dict[str, Any] = {
-            "path": f["file"],
-            "line": f["line"],
-            "side": f.get("side", "RIGHT"),
+            "path": f_dict["file"],
+            "line": f_dict["line"],
+            "side": f_dict.get("side", "RIGHT"),
             "body": body,
         }
-        end_line = f.get("end_line")
-        if isinstance(end_line, int) and end_line > f["line"]:
-            comment["start_line"] = f["line"]
+        end_line = f_dict.get("end_line")
+        if isinstance(end_line, int) and end_line > f_dict["line"]:
+            comment["start_line"] = f_dict["line"]
             comment["start_side"] = comment["side"]
             comment["line"] = end_line
         comments.append(comment)
@@ -269,9 +309,19 @@ def _finding_inline_body(f: dict[str, Any], run_url: str, run_id: str) -> str:
     fid = f.get("id", "BOT-?")
     sev = f.get("severity", "medium")
     cat = f.get("category", "quality")
-    title = (f.get("title") or "").strip()
-    message = f.get("message", "").strip()
-    suggestion = f.get("suggestion")
+    title_raw = (f.get("title") or "").strip()
+    message_raw = f.get("message", "").strip()
+    suggestion_raw = f.get("suggestion")
+    # W5-Redaction: scrub credentials in every LLM-emitted body field at
+    # construction time. Static labels (severity, category, run id, run
+    # URL) are not LLM-controlled and are skipped.
+    title, _ = redact_for_publish(title_raw)
+    message, _ = redact_for_publish(message_raw)
+    suggestion = (
+        redact_for_publish(suggestion_raw)[0]
+        if isinstance(suggestion_raw, str)
+        else suggestion_raw
+    )
 
     parts = [f"**{fid}** — {SEVERITY_LABELS.get(sev, sev)} ({cat})"]
     if title:

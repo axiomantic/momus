@@ -12,9 +12,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from .checks import post_check_run
 from .config import Config, load_config
 from .fetch_priors import fetch_prior_threads
+from .findings_schema import FindingsDoc
 from .hunks import parse_unified_diff
 from .invoke_pi import invoke_pi_phase_with_retry
 from .preflight import preflight
@@ -199,10 +202,16 @@ def _run(
             on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
         )
         tracker.finish("phase3")
-        findings_doc = _read_outputs_json(outputs_dir / "findings.json")
+
+    # W5 validation gate: read + validate the FINAL findings.json against
+    # FindingsDoc before posting. Malformed shapes (extra keys, wrong
+    # types, oversize text) fail closed here — sys.exit(1) before any GH
+    # API call.
+    validated_doc = _read_findings_doc(outputs_dir / "findings.json")
+    findings_doc = validated_doc.model_dump()
 
     # Publish.
-    verdict = findings_doc.get("verdict") or "COMMENT"
+    verdict = validated_doc.verdict
     _log(f"Publishing review (verdict={verdict})")
     # Force a near-100% post on the way in to publish.
     post_status(
@@ -212,7 +221,7 @@ def _run(
         percent=tracker.percent(),
         **status_kwargs,
     )
-    publish(findings_doc, prior_findings, pr_meta, config, run_url)
+    publish(validated_doc, prior_findings, pr_meta, config, run_url)
     post_check_run(
         owner=pr_meta["owner"],
         repo=pr_meta["repo"],
@@ -336,6 +345,32 @@ def _read_outputs_json(path: Path, default: Any = None) -> Any:
             return default
         raise FileNotFoundError(f"expected output not produced: {path}")
     return json.loads(path.read_text())
+
+
+def _read_findings_doc(path: Path) -> FindingsDoc:
+    """Read and validate findings.json against the FindingsDoc schema (W5).
+
+    Validation failures fail-closed: log a clear line to stderr and
+    `sys.exit(1)`. The publisher is never called and no PR comment is
+    posted. This is the W5 contract — schema rejection is a fatal error.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"expected output not produced: {path}")
+    raw = json.loads(path.read_text())
+    try:
+        return FindingsDoc.model_validate(raw)
+    except ValidationError as exc:
+        # `errors()` is structured; render it inline so a human reading
+        # the action log can pinpoint the offending field. The path
+        # element of each error names the offending key (e.g.
+        # `findings.0.severity`).
+        lines = [f"findings.json schema validation failed: {path}"]
+        for err in exc.errors():
+            loc = ".".join(str(p) for p in err.get("loc", ()))
+            lines.append(f"  - {loc}: {err.get('msg', '')}")
+        message = "\n".join(lines)
+        print(message, file=sys.stderr)
+        sys.exit(1)
 
 
 def _guess_run_url() -> str:
