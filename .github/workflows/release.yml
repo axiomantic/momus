@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - pyproject.toml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect version change
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION="$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')"
+          if [ -z "$NEW_VERSION" ]; then
+            echo "::error::Could not parse [project].version from pyproject.toml"
+            exit 1
+          fi
+
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          if [ "$BEFORE_SHA" = "$ZERO_SHA" ] || [ -z "$BEFORE_SHA" ]; then
+            OLD_VERSION=""
+          else
+            OLD_VERSION="$(git show "$BEFORE_SHA:pyproject.toml" 2>/dev/null \
+              | grep -E '^version = ' | head -1 \
+              | sed -E 's/version = "([^"]+)"/\1/' || true)"
+          fi
+
+          echo "new=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "old=${OLD_VERSION:-<none>}" >> "$GITHUB_OUTPUT"
+
+          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+            echo "Version unchanged ($NEW_VERSION); nothing to release."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version '$NEW_VERSION' does not match MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+
+          if [ -n "$OLD_VERSION" ]; then
+            HIGHER="$(printf '%s\n%s\n' "$OLD_VERSION" "$NEW_VERSION" | sort -V | tail -1)"
+            if [ "$HIGHER" != "$NEW_VERSION" ]; then
+              echo "::error::Version $NEW_VERSION is not greater than previous $OLD_VERSION"
+              exit 1
+            fi
+          fi
+
+          MAJOR="$(echo "$NEW_VERSION" | cut -d. -f1)"
+          echo "major=$MAJOR" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          echo "Releasing v$NEW_VERSION (moving major tag: v$MAJOR)"
+
+      - name: Tag and release
+        if: steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          MAJOR: ${{ steps.version.outputs.major }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          IMMUTABLE="v${NEW_VERSION}"
+          MOVING="v${MAJOR}"
+
+          if git rev-parse --verify --quiet "refs/tags/${IMMUTABLE}" >/dev/null; then
+            echo "::error::Tag ${IMMUTABLE} already exists; refusing to overwrite an immutable tag"
+            exit 1
+          fi
+
+          git tag -a "${IMMUTABLE}" -m "Release ${IMMUTABLE}"
+          git tag -f "${MOVING}" "${IMMUTABLE}"
+
+          git push origin "${IMMUTABLE}"
+          git push --force origin "${MOVING}"
+
+          gh release create "${IMMUTABLE}" \
+            --title "${IMMUTABLE}" \
+            --generate-notes
