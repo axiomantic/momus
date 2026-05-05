@@ -14,6 +14,48 @@ from momus.config import load_config
 from momus.render import render_phase_prompt
 
 
+def _extract_example_finding(rendered: str) -> dict:
+    """Locate the example finding JSON object in a rendered phase-2 prompt.
+
+    Walks backward from the ``"calibration"`` key to the matching opening
+    brace, then forward with brace-depth tracking to the matching close.
+    Returns the parsed JSON dict.
+    """
+    idx = rendered.find('"calibration"')
+    assert idx != -1, "rendered prompt missing calibration field example"
+    open_idx = rendered.rfind("{", 0, idx)
+    assert open_idx != -1, "no opening brace before calibration field"
+
+    # Walk forward from open_idx with brace-depth tracking. Skip over
+    # string literals so braces inside strings do not throw off depth.
+    depth = 0
+    in_string = False
+    escape = False
+    close_idx = -1
+    for pos in range(open_idx, len(rendered)):
+        ch = rendered[pos]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                close_idx = pos
+                break
+    assert close_idx != -1, "no balanced closing brace for example finding"
+    blob = rendered[open_idx:close_idx + 1]
+    return json.loads(blob)
+
+
 def _make_work_dir(tmp_path: Path, _files: list[str]) -> Path:
     """Create a work_dir scaffold under tmp_path. The list arg is reserved
     for future expansion (W0-Render); for now no files are needed.
@@ -61,6 +103,51 @@ def test_render_calibration_field_uses_unprefixed_key(tmp_path, cfg):
     assert '"_calibration"' not in rendered
     if cfg.review.require_calibration:
         assert '"calibration"' in rendered
+
+
+def test_render_calibration_field_example_is_dict_shaped(tmp_path, cfg):
+    """The phase-2 rendered prompt shows an example finding object. The
+    `calibration` example in that block must be a JSON object (dict),
+    not a string, because findings_schema.Finding declares
+    ``calibration: Optional[dict]`` with model_config={"extra": "forbid"}.
+
+    A string-typed example invites the LLM to emit
+    ``"calibration": "Would a human block? ..."`` which fails Pydantic
+    validation and breaks the publish path. This test guards that
+    invariant by parsing the rendered example block and asserting the
+    calibration value is a dict.
+    """
+    if not cfg.review.require_calibration:
+        pytest.skip("require_calibration is disabled in this config")
+
+    _make_work_dir(tmp_path, [])
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+
+    parsed = _extract_example_finding(rendered)
+    assert isinstance(parsed["calibration"], dict), (
+        f"calibration example must be a JSON object, got "
+        f"{type(parsed['calibration']).__name__}: {parsed['calibration']!r}"
+    )
+
+
+def test_render_calibration_example_validates_against_schema(tmp_path, cfg):
+    """The example finding shown in the phase-2 prompt must round-trip
+    through the production Pydantic Finding model. If the example fails
+    schema validation, the prompt is teaching the LLM a shape that
+    publish.py will reject — precisely the bug this test guards.
+    """
+    if not cfg.review.require_calibration:
+        pytest.skip("require_calibration is disabled in this config")
+
+    from momus.findings_schema import Finding
+
+    _make_work_dir(tmp_path, [])
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    parsed = _extract_example_finding(rendered)
+
+    # The example uses a placeholder id like "BOT-A1" (id_example) which
+    # matches the schema regex. Validate it.
+    Finding.model_validate(parsed)
 
 
 def test_phase3_verify_prompt_uses_unprefixed_calibration_key():

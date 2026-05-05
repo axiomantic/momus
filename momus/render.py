@@ -119,8 +119,14 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
             "   demote the severity. Reviews that block on weak reasoning\n"
             "   poison trust in the bot."
         )
+        # The schema declares calibration as Optional[dict] with
+        # extra='forbid'. The prompt example must show a JSON object so
+        # the model emits the right shape; a string-typed example causes
+        # Pydantic validation to fail and the publish path to abort.
         calibration_field = (
-            ',\n      "calibration": "Would a human block? Yes/no/why."'
+            ',\n      "calibration": '
+            '{"would_human_block": "yes|no", '
+            '"rationale": "<short explanation>"}'
         )
     else:
         calibration_procedure = ""
