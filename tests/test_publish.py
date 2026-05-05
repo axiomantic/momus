@@ -193,11 +193,14 @@ def test_token_lookup_failure_outside_ci_does_not_downgrade(
     gh_api.returns({})
     user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
     user_info.returns(None)
+    app_slug = tripwire.mock.object(publish_mod, "_get_token_app_slug")
+    app_slug.returns(None)
 
     with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
     user_info.assert_call(args=(), kwargs={})
+    app_slug.assert_call(args=(), kwargs={})
     expected_body = _expected_rendered_body(findings, run_url="https://run/1")
     gh_api.assert_call(
         args=(
@@ -216,11 +219,9 @@ def test_token_lookup_failure_outside_ci_does_not_downgrade(
 
 
 def test_default_github_token_in_actions_downgrades(monkeypatch):
-    """Inside Actions with no custom App configured, downgrade APPROVE.
-
-    The default `GITHUB_TOKEN` (a `github-actions` App installation token)
-    cannot APPROVE — GitHub rejects approvals from that user. The workflow
-    signals "no custom App" by leaving `MOMUS_USING_APP_TOKEN` unset.
+    """Inside Actions with no App-slug detection and no env-var override,
+    downgrade APPROVE. Legacy fallback path: simulates a runner where
+    `GET /app` is unavailable AND `MOMUS_USING_APP_TOKEN` is unset.
     """
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
@@ -233,6 +234,8 @@ def test_default_github_token_in_actions_downgrades(monkeypatch):
     gh_api.returns({})
     user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
     user_info.returns(None)
+    app_slug = tripwire.mock.object(publish_mod, "_get_token_app_slug")
+    app_slug.returns(None)
 
     with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
@@ -246,6 +249,7 @@ def test_default_github_token_in_actions_downgrades(monkeypatch):
         findings, run_url="https://run/1"
     )
     user_info.assert_call(args=(), kwargs={})
+    app_slug.assert_call(args=(), kwargs={})
     gh_api.assert_call(
         args=(
             "POST",
@@ -261,11 +265,10 @@ def test_default_github_token_in_actions_downgrades(monkeypatch):
     )
 
 
-def test_custom_app_token_in_actions_does_not_downgrade(monkeypatch):
-    """Inside Actions with a custom GitHub App token, allow APPROVE through.
-
-    The workflow's detect-app step sets `MOMUS_USING_APP_TOKEN=true` when the
-    user has configured an App. App installation tokens may APPROVE PRs.
+def test_custom_app_token_env_flag_does_not_downgrade(monkeypatch):
+    """Legacy fallback: with App-slug detection unavailable, an explicit
+    `MOMUS_USING_APP_TOKEN=true` keeps APPROVE through. Preserved for
+    backward compat with workflows that pre-date slug detection.
     """
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("MOMUS_USING_APP_TOKEN", "true")
@@ -278,12 +281,102 @@ def test_custom_app_token_in_actions_does_not_downgrade(monkeypatch):
     gh_api.returns({})
     user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
     user_info.returns(None)
+    app_slug = tripwire.mock.object(publish_mod, "_get_token_app_slug")
+    app_slug.returns(None)
 
     with tripwire:
         publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
 
     expected_body = _expected_rendered_body(findings, run_url="https://run/1")
     user_info.assert_call(args=(), kwargs={})
+    app_slug.assert_call(args=(), kwargs={})
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
+
+
+def test_default_app_slug_in_actions_downgrades(monkeypatch):
+    """`gh api /app` returning ``slug=github-actions`` proves the token is
+    the default Actions installation token. Downgrade APPROVE without
+    needing any workflow flag.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
+
+    cfg = _minimal_config()
+    pr_meta = _pr_meta(author="some-human")
+    findings = _findings_doc(verdict="APPROVE")
+
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns(None)
+    app_slug = tripwire.mock.object(publish_mod, "_get_token_app_slug")
+    app_slug.returns("github-actions")
+
+    with tripwire:
+        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+
+    expected_note = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because the "
+        "default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; "
+        "see SETUP.md)._\n\n"
+    )
+    expected_body = expected_note + _expected_rendered_body(
+        findings, run_url="https://run/1"
+    )
+    user_info.assert_call(args=(), kwargs={})
+    app_slug.assert_call(args=(), kwargs={})
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": pr_meta["head_sha"],
+                "body": expected_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
+
+
+def test_custom_app_slug_in_actions_does_not_downgrade(monkeypatch):
+    """`gh api /app` returning a non-Actions slug proves the workflow
+    minted a custom App token. Allow APPROVE through without needing
+    `MOMUS_USING_APP_TOKEN`.
+    """
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("MOMUS_USING_APP_TOKEN", raising=False)
+
+    cfg = _minimal_config()
+    pr_meta = _pr_meta(author="some-human")
+    findings = _findings_doc(verdict="APPROVE")
+
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
+    user_info = tripwire.mock.object(publish_mod, "_get_token_user_info")
+    user_info.returns(None)
+    app_slug = tripwire.mock.object(publish_mod, "_get_token_app_slug")
+    app_slug.returns("axiomantic-momus")
+
+    with tripwire:
+        publish_mod.publish(findings, [], pr_meta, cfg, run_url="https://run/1")
+
+    expected_body = _expected_rendered_body(findings, run_url="https://run/1")
+    user_info.assert_call(args=(), kwargs={})
+    app_slug.assert_call(args=(), kwargs={})
     gh_api.assert_call(
         args=(
             "POST",

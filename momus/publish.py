@@ -368,14 +368,56 @@ def _get_token_user_info() -> dict[str, Any] | None:
         return None
 
 
+def _get_token_app_slug() -> str | None:
+    """Return the slug of the GitHub App that owns the current token.
+
+    `GET /app` works for any installation token and returns the owning
+    App's metadata. The default Actions ``GITHUB_TOKEN`` is itself an
+    installation token for the ``github-actions`` App, so it returns
+    that slug. A custom-App installation token returns the custom App's
+    slug. Personal access tokens / OAuth tokens 4xx — caller treats
+    None as "not an App token".
+    """
+    try:
+        proc = subprocess.run(
+            ["gh", "api", "/app"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    slug = data.get("slug")
+    return slug if isinstance(slug, str) and slug else None
+
+
 def _approve_downgrade_reason(pr_author: str | None) -> str | None:
     """Return a one-line reason if APPROVE should be downgraded; else None."""
     info = _get_token_user_info()
     if info is None:
         # `gh api /user` 4xxs for any installation token — both the default
         # GITHUB_TOKEN (which GitHub *will* reject for APPROVE) and a custom
-        # GitHub App installation token (which is allowed to APPROVE). The
-        # workflow tells us which one we have via MOMUS_USING_APP_TOKEN.
+        # GitHub App installation token (which is allowed to APPROVE). They
+        # differ in which App owns the token: the default belongs to the
+        # ``github-actions`` App, customs to whatever App the workflow
+        # provisioned. ``GET /app`` returns the owning App for either, so
+        # use that to tell them apart instead of relying on a workflow flag.
+        slug = _get_token_app_slug()
+        if slug == "github-actions":
+            return "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
+        if slug is not None:
+            # A non-Actions App slug means the workflow minted an App token
+            # whose installation has approval rights. Allow.
+            return None
+        # ``GET /app`` failed too. Fall back to the legacy explicit flag,
+        # then default-deny if nothing tells us otherwise — same posture
+        # we shipped before App-slug detection landed.
         if os.environ.get("MOMUS_USING_APP_TOKEN") == "true":
             return None
         if os.environ.get("GITHUB_ACTIONS") == "true":
