@@ -13,10 +13,12 @@
  *     ./outputs/ relative to CWD. Refuses anything else.
  *
  * Load with: pi -p "..." -e ./extensions/readonly-tools.ts \
- *              --tools read,grep,find,ls,bash_ro,write_output
+ *              --tools read_repo,grep_repo,find_repo,ls_repo,bash_ro,write_output
  *
- * Built-in `bash`, `write`, `edit` are excluded by virtue of not being
- * named in --tools.
+ * Built-in `bash`, `write`, `edit`, `read`, `grep`, `find`, `ls` are
+ * excluded by virtue of not being named in --tools. The *_repo tools
+ * registered below are cwd-contained replacements for pi's filesystem-
+ * wide built-ins (W2 hardening).
  */
 
 import { spawn } from "node:child_process";
