@@ -25,12 +25,13 @@ import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -46,6 +47,40 @@ const ALLOWED_BINS = new Set([
   "ls",
   "grep",
 ]);
+
+/**
+ * Validate the shape of MOMUS_WORK_DIR (W4-WorkDirValidation).
+ *
+ * Pi runs with cwd=repo_root and the orchestrator sets MOMUS_WORK_DIR to
+ * a path relative to that cwd. To prevent extension consumers (and the
+ * Python-side orchestrator) from being tricked into writing outside the
+ * repo, the value MUST be:
+ *
+ *   - A relative path matching `[A-Za-z0-9._/-]+` (no whitespace, no
+ *     metacharacters that could leak into shell-unsafe contexts).
+ *   - Not absolute (no leading `/`).
+ *   - Free of `..` segments (no `parent/..` traversal escapes).
+ *
+ * Throws a load-time error on violation so pi fails before any LLM call.
+ * Complements the Python-side check at `momus/__main__.py:53-71`.
+ *
+ * Exported for tests; called at module load below.
+ */
+export function validateMomusWorkDir(value: string | undefined): void {
+  if (value === undefined) return;
+  const ok =
+    /^[A-Za-z0-9._/-]+$/.test(value) &&
+    !value.startsWith("/") &&
+    !value.split("/").includes("..");
+  if (!ok) {
+    throw new Error(
+      `readonly-tools: MOMUS_WORK_DIR invalid (got '${value}'); ` +
+        `must match /^[A-Za-z0-9._/-]+$/, no leading slash, no '..' segments.`,
+    );
+  }
+}
+
+validateMomusWorkDir(process.env.MOMUS_WORK_DIR);
 
 // `MOMUS_WORK_DIR` is set by the orchestrator (momus/invoke_pi.py) to
 // the work_dir's path relative to repo_root (e.g. ".momus"). Pi runs
@@ -680,6 +715,218 @@ function checkRefColonPathArgv(
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// W4-BashArgvWalk: absolute/tilde argv rejection for non-git binaries
+// ---------------------------------------------------------------------------
+
+export type ArgvRejectReason = "AbsolutePathArg" | "HomePathArg";
+
+/**
+ * Reject argv tokens that begin with `/` (absolute) or `~`/`~/` (home).
+ *
+ * Skips `argv[0]` (the binary name; ALLOWED_BINS already constrains it).
+ * Walked AFTER tokenize() + ALLOWED_BINS check; runs INSTEAD of
+ * `checkGitArgv` for non-`git` binaries (the git wrapper handles its own
+ * subcommand-specific path positions because git accepts ref-like tokens
+ * containing `/` such as `origin/main`).
+ *
+ * Rationale: tools like `cat`, `head`, `tail`, `wc`, `find`, `grep`, `rg`,
+ * `ls` all accept positional path arguments. An absolute path here means
+ * the LLM is reaching outside the repo; a `~/`-prefixed path means the
+ * LLM is reaching into the runner's home directory. Both are out of
+ * scope for a read-only review tool and are rejected without spawning.
+ */
+export function rejectAbsoluteArgv(
+  argv: string[],
+):
+  | { ok: true }
+  | { ok: false; reason: ArgvRejectReason; offending: string } {
+  for (let i = 1; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("/")) {
+      return { ok: false, reason: "AbsolutePathArg", offending: tok };
+    }
+    if (tok === "~" || tok.startsWith("~/")) {
+      return { ok: false, reason: "HomePathArg", offending: tok };
+    }
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// W4-WriteOutputRealpath: write_output execute body with symlink hardening
+// ---------------------------------------------------------------------------
+
+export interface WriteOutputParams {
+  path: string;
+  content: string;
+}
+
+/**
+ * write_output execute body. Exported so tests can drive it with explicit
+ * cwd + outputsAbs (the registered tool wraps this with `process.cwd()`
+ * and `resolve(cwd, OUTPUTS_DIR)`).
+ *
+ * Containment per design §W4 ordered steps:
+ *   1. Resolve relative path; reject `..` traversal and non-OUTPUTS_DIR prefix.
+ *   2. mkdir parent dir (recursive).
+ *   3. realpath(parent) — now guaranteed to exist; rejects symlinked parent.
+ *   4. Compose realPath = realParent + basename(resolved).
+ *   5. Assert `relative(realOutputs, realPath)` is contained.
+ *   6. If realPath already exists, realpath it; reject if it escapes outputs.
+ *   7. writeFileSync.
+ */
+export async function executeWriteOutput(
+  params: WriteOutputParams,
+  cwd: string,
+  outputsAbs: string,
+): Promise<any> {
+  const { path: inputPath, content } = params;
+  const outputsDirRel = relative(cwd, outputsAbs) || basename(outputsAbs);
+
+  const abs = resolve(cwd, inputPath);
+  const rel = relative(cwd, abs);
+
+  // (1) Existing absolute / `..` traversal / wrong-prefix rejection.
+  if (
+    isAbsolute(rel) ||
+    rel.startsWith("..") ||
+    (rel !== outputsDirRel && !rel.startsWith(`${outputsDirRel}/`))
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: path must be under ${outputsDirRel}/ (got '${rel}')`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const parentDir = dirname(abs);
+
+  // (2) Ensure parent exists. mkdir comes BEFORE realpath because
+  // realpathSync throws ENOENT on missing dirs.
+  try {
+    mkdirSync(parentDir, { recursive: true });
+  } catch (e: any) {
+    return {
+      content: [
+        { type: "text", text: `rejected: mkdir parent failed: ${e?.message}` },
+      ],
+      isError: true,
+    };
+  }
+
+  // (3) realpath the parent. If parent is a symlink that escapes outputs,
+  // this is where we catch it. realpath(outputsAbs) may itself be a
+  // symlink to a legitimate location (e.g., macOS /var -> /private/var);
+  // both sides go through realpath so the relative-path comparison is
+  // consistent.
+  //
+  // We ALSO realpath cwd and require realOutputs to live inside it: this
+  // catches the "OUTPUTS_DIR is itself an outbound symlink" attack, where
+  // both realParent and realOutputs resolve to the same attacker dir and
+  // the relative-path containment check below would otherwise pass.
+  let realParent: string;
+  let realOutputs: string;
+  let realCwd: string;
+  try {
+    realParent = realpathSync(parentDir);
+    realOutputs = realpathSync(outputsAbs);
+    realCwd = realpathSync(cwd);
+  } catch (e: any) {
+    return {
+      content: [
+        { type: "text", text: `rejected: realpath parent failed: ${e?.message}` },
+      ],
+      isError: true,
+    };
+  }
+  const relOutputsFromCwd = relative(realCwd, realOutputs);
+  if (
+    relOutputsFromCwd.startsWith("..") ||
+    isAbsolute(relOutputsFromCwd) ||
+    relOutputsFromCwd === ".."
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: ParentEscapesOutputs (realOutputs='${realOutputs}' realCwd='${realCwd}')`,
+        },
+      ],
+      isError: true,
+      details: { error: "ParentEscapesOutputs", realOutputs, realCwd },
+    };
+  }
+
+  // (4) Compose final path.
+  const realPath = resolve(realParent, basename(abs));
+
+  // (5) Containment: realPath must be inside realOutputs.
+  const relFromOutputs = relative(realOutputs, realPath);
+  if (
+    relFromOutputs.startsWith("..") ||
+    isAbsolute(relFromOutputs) ||
+    relFromOutputs === ".."
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: ParentEscapesOutputs (realParent='${realParent}' realOutputs='${realOutputs}')`,
+        },
+      ],
+      isError: true,
+      details: { error: "ParentEscapesOutputs", realParent, realOutputs },
+    };
+  }
+
+  // (6) If realPath already exists as a symlink that escapes outputs, reject.
+  if (existsSync(realPath)) {
+    let realFinal: string;
+    try {
+      realFinal = realpathSync(realPath);
+    } catch (e: any) {
+      return {
+        content: [
+          { type: "text", text: `rejected: realpath final failed: ${e?.message}` },
+        ],
+        isError: true,
+      };
+    }
+    const relFinal = relative(realOutputs, realFinal);
+    if (
+      relFinal.startsWith("..") ||
+      isAbsolute(relFinal) ||
+      relFinal === ".."
+    ) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `rejected: ExistingPathEscapesOutputs (realFinal='${realFinal}')`,
+          },
+        ],
+        isError: true,
+        details: { error: "ExistingPathEscapesOutputs", realFinal },
+      };
+    }
+  }
+
+  // (7) Write.
+  writeFileSync(realPath, content, "utf8");
+
+  return {
+    content: [
+      { type: "text", text: `wrote ${rel} (${content.length} bytes)` },
+    ],
+    details: { path: rel, bytes: content.length },
+  };
+}
+
 class RejectError extends Error {}
 
 function tokenize(cmd: string): string[] {
@@ -944,22 +1191,49 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // W2-Wrapper: deterministic git-argv path containment. For non-git
-      // binaries this short-circuits {ok: true}.
-      const gitCheck = checkGitArgv(argv, process.cwd());
-      if (!gitCheck.ok) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
-                `git path argument outside repo: ${gitCheck.reason}\n`,
+      // W2-Wrapper / W4-BashArgvWalk:
+      //   - For `git`, run the deterministic per-subcommand path
+      //     containment from W2 (refs may legitimately contain `/`).
+      //   - For every other allowed bin, run rejectAbsoluteArgv: any
+      //     positional starting with `/` or `~` is out of scope for a
+      //     read-only review tool.
+      if (bin === "git") {
+        const gitCheck = checkGitArgv(argv, process.cwd());
+        if (!gitCheck.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                  `git path argument outside repo: ${gitCheck.reason}\n`,
+              },
+            ],
+            details: { exitCode: 2, gitArgvReject: gitCheck.reason },
+            isError: true,
+          };
+        }
+      } else {
+        const argCheck = rejectAbsoluteArgv(argv);
+        if (!argCheck.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                  `argv contains disallowed path token: ${argCheck.reason} ` +
+                  `(${argCheck.offending})\n`,
+              },
+            ],
+            details: {
+              exitCode: 2,
+              argvReject: argCheck.reason,
+              offending: argCheck.offending,
             },
-          ],
-          details: { exitCode: 2, gitArgvReject: gitCheck.reason },
-          isError: true,
-        };
+            isError: true,
+          };
+        }
       }
 
       return await new Promise((resolveP) => {
@@ -1033,34 +1307,10 @@ export default function (pi: ExtensionAPI) {
       }),
       content: Type.String({ description: "File contents." }),
     }),
-    async execute(_id, { path, content }) {
+    async execute(_id, params) {
       const cwd = process.cwd();
-      const abs = resolve(cwd, path);
-      const rel = relative(cwd, abs);
-
-      if (
-        isAbsolute(rel) ||
-        rel.startsWith("..") ||
-        (rel !== OUTPUTS_DIR && !rel.startsWith(`${OUTPUTS_DIR}/`))
-      ) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `rejected: path must be under ${OUTPUTS_DIR}/ (got '${rel}')`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content, "utf8");
-
-      return {
-        content: [{ type: "text", text: `wrote ${rel} (${content.length} bytes)` }],
-        details: { path: rel, bytes: content.length },
-      };
+      const outputsAbs = resolve(cwd, OUTPUTS_DIR);
+      return executeWriteOutput(params, cwd, outputsAbs);
     },
   });
 }

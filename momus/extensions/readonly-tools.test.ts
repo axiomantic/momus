@@ -25,8 +25,11 @@ import {
   executeGrepRepo,
   executeLsRepo,
   executeReadRepo,
+  executeWriteOutput,
   isDeepSeekViaOpenRouter,
+  rejectAbsoluteArgv,
   rewriteThinkingSignaturesForDeepSeek,
+  validateMomusWorkDir,
 } from "./readonly-tools.ts";
 
 function makeCwd(): string {
@@ -813,5 +816,180 @@ describe("checkGitArgv", () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("AmbiguousShowArgv");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-BashArgvWalk: rejectAbsoluteArgv for non-git binaries
+// ---------------------------------------------------------------------------
+
+describe("rejectAbsoluteArgv", () => {
+  test("bash_ro_rejects_absolute_argv_token", () => {
+    // `cat /etc/passwd` — absolute path positional must be rejected.
+    const r = rejectAbsoluteArgv(["cat", "/etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("AbsolutePathArg");
+      expect(r.offending).toBe("/etc/passwd");
+    }
+  });
+
+  test("bash_ro_rejects_tilde_argv_token", () => {
+    // `cat ~/secrets` — tilde-rooted path positional must be rejected.
+    const r = rejectAbsoluteArgv(["cat", "~/secrets"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("HomePathArg");
+      expect(r.offending).toBe("~/secrets");
+    }
+  });
+
+  test("bash_ro_rejects_bare_tilde_argv_token", () => {
+    const r = rejectAbsoluteArgv(["ls", "~"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("HomePathArg");
+      expect(r.offending).toBe("~");
+    }
+  });
+
+  test("bash_ro_allows_relative_path_argv_token", () => {
+    // `grep -r foo .` — entirely relative; must pass.
+    const r = rejectAbsoluteArgv(["grep", "-r", "foo", "."]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_relative_subdir_path", () => {
+    // `find src -name '*.py'` — relative path arg.
+    const r = rejectAbsoluteArgv(["find", "src", "-name", "*.py"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_no_positional_args", () => {
+    const r = rejectAbsoluteArgv(["ls"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_does_not_inspect_argv0_for_absolute", () => {
+    // argv[0] is the binary name, not a path arg. The caller has already
+    // run the ALLOWED_BINS check; we MUST NOT re-reject here.
+    const r = rejectAbsoluteArgv(["ls", "subdir"]);
+    expect(r.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-WriteOutputRealpath: write_output post-realpath containment
+// ---------------------------------------------------------------------------
+
+describe("write_output realpath containment", () => {
+  test("write_output_succeeds_when_parent_realpath_inside_outputs", async () => {
+    const cwd = makeCwd();
+    // OUTPUTS_DIR resolves to "outputs" relative to cwd by default.
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: '{"ok": true}' },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBeUndefined();
+    expect(
+      require("node:fs").readFileSync(join(outputsAbs, "findings.json"), "utf8"),
+    ).toBe('{"ok": true}');
+  });
+
+  test("write_output_rejects_symlinked_parent_dir", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-write-attacker-"));
+    // Create a symlink at "outputs" that points outside the repo.
+    symlinkSync(realpathSync(outside), join(cwd, "outputs"));
+    // realOutputs resolves to the attacker dir; write_output's containment
+    // check uses outputsAbs (cwd/outputs) as intended root. The symlink
+    // makes realParent escape that root.
+    const outputsAbs = join(cwd, "outputs");
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: "x" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("ParentEscapesOutputs");
+  });
+
+  test("write_output_rejects_existing_path_that_is_outbound_symlink", async () => {
+    const cwd = makeCwd();
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    // Place an existing symlink at outputs/findings.json -> /etc/passwd
+    // (using a real outside file so realpathSync resolves cleanly).
+    const outside = mkdtempSync(join(tmpdir(), "momus-write-existing-"));
+    const outsideTarget = join(outside, "secret.txt");
+    writeFileSync(outsideTarget, "secret");
+    symlinkSync(realpathSync(outsideTarget), join(outputsAbs, "findings.json"));
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: "overwrite" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("ExistingPathEscapesOutputs");
+    // The outside file MUST be unchanged.
+    expect(
+      require("node:fs").readFileSync(outsideTarget, "utf8"),
+    ).toBe("secret");
+  });
+
+  test("write_output_rejects_dotdot_traversal", async () => {
+    const cwd = makeCwd();
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    const r = await executeWriteOutput(
+      { path: "../escape.json", content: "x" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("rejected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-WorkDirValidation: MOMUS_WORK_DIR validation at extension load
+// ---------------------------------------------------------------------------
+
+describe("validateMomusWorkDir", () => {
+  test("momus_work_dir_validation_accepts_dot_momus", () => {
+    expect(() => validateMomusWorkDir(".momus")).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_accepts_simple_relative", () => {
+    expect(() => validateMomusWorkDir("work/momus")).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_accepts_undefined", () => {
+    expect(() => validateMomusWorkDir(undefined)).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_rejects_absolute_path", () => {
+    expect(() => validateMomusWorkDir("/etc")).toThrow(/MOMUS_WORK_DIR invalid/);
+  });
+
+  test("momus_work_dir_validation_rejects_dotdot", () => {
+    expect(() => validateMomusWorkDir("../escape")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
+  });
+
+  test("momus_work_dir_validation_rejects_embedded_dotdot", () => {
+    expect(() => validateMomusWorkDir("foo/../etc")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
+  });
+
+  test("momus_work_dir_validation_rejects_bad_chars", () => {
+    expect(() => validateMomusWorkDir("foo;rm")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
   });
 });
