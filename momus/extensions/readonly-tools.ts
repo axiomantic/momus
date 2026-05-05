@@ -20,8 +20,14 @@
  */
 
 import { spawn } from "node:child_process";
+import {
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
@@ -49,6 +55,127 @@ const OUTPUTS_DIR = process.env.MOMUS_WORK_DIR
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
+const MAX_READ_BYTES = 4 * 1024 * 1024; // 4 MiB cap per read_repo call
+
+// Cwd-containment taxonomy (W2). Shared across read_repo, grep_repo,
+// find_repo, ls_repo and the bash_ro git wrapper.
+export type ErrorReason =
+  | "OutsideRepo"
+  | "Symlink"
+  | "DenyListedPath"
+  | "NotFound"
+  | "InvalidArgument"
+  | "TooLarge";
+
+const DENY_LIST: RegExp[] = [
+  /^\/proc\//,
+  /^\/etc\//,
+  /^\/sys\//,
+  /^\/dev\//,
+];
+
+/**
+ * Verify a tool input path stays inside the repo cwd.
+ *
+ * Steps (per design §W2):
+ *   1. Reject empty / non-string / absolute / `~/` inputs.
+ *   2. resolve(cwd, input); reject relative-escape via path.sep prefix check.
+ *   3. realpath(parent dir) — rejects symlinks at the parent level even
+ *      when the leaf doesn't exist yet. ENOENT on parent => NotFound.
+ *   4. realpath(resolved) if exists — rejects symlinks at the leaf.
+ *   5. DenyList check on both pre- and post-realpath forms.
+ *
+ * Returns the post-realpath resolved path on success.
+ */
+export function ensureWithinCwd(
+  input: string,
+  cwd: string,
+):
+  | { ok: true; resolved: string }
+  | { ok: false; reason: ErrorReason } {
+  if (!input || typeof input !== "string") {
+    return { ok: false, reason: "InvalidArgument" };
+  }
+  if (input.startsWith("/")) return { ok: false, reason: "OutsideRepo" };
+  if (input === "~" || input.startsWith("~/")) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  const resolved = resolve(cwd, input);
+  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  // Parent-realpath: works whether or not the leaf exists.
+  const parent = dirname(resolved);
+  let realParent: string;
+  try {
+    realParent = realpathSync(parent);
+  } catch (e: any) {
+    if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
+    return { ok: false, reason: "InvalidArgument" };
+  }
+  if (!realParent.startsWith(cwd + sep) && realParent !== cwd) {
+    return { ok: false, reason: "Symlink" };
+  }
+  let realFinal = resolved;
+  if (existsSync(resolved)) {
+    try {
+      realFinal = realpathSync(resolved);
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
+      return { ok: false, reason: "InvalidArgument" };
+    }
+    if (!realFinal.startsWith(cwd + sep) && realFinal !== cwd) {
+      return { ok: false, reason: "Symlink" };
+    }
+  }
+  for (const re of DENY_LIST) {
+    if (re.test(realFinal) || re.test(resolved)) {
+      return { ok: false, reason: "DenyListedPath" };
+    }
+  }
+  return { ok: true, resolved: realFinal };
+}
+
+function toolError(reason: ErrorReason, path: string) {
+  return {
+    content: [{ type: "text" as const, text: `error: ${reason}: ${path}` }],
+    isError: true as const,
+    details: { error: reason, path },
+  };
+}
+
+export interface ReadRepoParams {
+  path: string;
+  offset?: number;
+  limit?: number;
+}
+
+/**
+ * read_repo execute body. Exported so tests can drive it with an explicit
+ * cwd (the registered tool wraps this with `process.cwd()`).
+ *
+ * Rejects: absolute, ~/, ../-traversal, symlinks escaping cwd, deny-listed
+ *   filesystem regions (/proc, /etc, /sys, /dev), files >4 MiB.
+ */
+export async function executeReadRepo(
+  params: ReadRepoParams,
+  cwd: string,
+): Promise<any> {
+  const check = ensureWithinCwd(params.path, cwd);
+  if (!check.ok) return toolError(check.reason, params.path);
+  if (!existsSync(check.resolved)) return toolError("NotFound", params.path);
+  const stat = statSync(check.resolved);
+  if (stat.size > MAX_READ_BYTES) return toolError("TooLarge", params.path);
+  const content = readFileSync(check.resolved, "utf8");
+  const lines = content.split("\n");
+  const offset = params.offset ?? 0;
+  const limit = params.limit ?? lines.length;
+  const slice = lines.slice(offset, offset + limit).join("\n");
+  return {
+    content: [{ type: "text", text: slice }],
+    details: { lines_total: lines.length, resolved_path: check.resolved },
+  };
+}
 
 class RejectError extends Error {}
 
@@ -186,6 +313,24 @@ export default function (pi: ExtensionAPI) {
       rewriteThinkingSignaturesForDeepSeek(event.messages);
     });
   }
+
+  pi.registerTool({
+    name: "read_repo",
+    label: "read (repo-cwd contained)",
+    description:
+      "Read a file relative to the repo cwd. Absolute and ~/ paths are " +
+      "rejected; symlinks that escape the cwd are rejected; the deny-list " +
+      "(/proc, /etc, /sys, /dev) is unreachable. Output is line-sliced " +
+      "via optional `offset` and `limit`.",
+    parameters: Type.Object({
+      path: Type.String({ description: "Relative path under cwd." }),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })),
+    }),
+    async execute(_id, params) {
+      return executeReadRepo(params, process.cwd());
+    },
+  });
 
   pi.registerTool({
     name: "bash_ro",

@@ -15,10 +15,21 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  ensureWithinCwd,
+  executeReadRepo,
   isDeepSeekViaOpenRouter,
   rewriteThinkingSignaturesForDeepSeek,
 } from "./readonly-tools.ts";
+
+function makeCwd(): string {
+  // realpathSync to resolve macOS /var -> /private/var so the helper's
+  // realpath comparisons line up.
+  return realpathSync(mkdtempSync(join(tmpdir(), "momus-rotest-")));
+}
 
 // pi-ai is installed at workflow runtime via npm. For tests, the harness
 // installs it locally. If unavailable, skip with a clear message rather
@@ -291,5 +302,93 @@ describe("end-to-end: pi-ai convertMessages emits reasoning_content", () => {
     expect(assistant).toBeDefined();
     expect(assistant.reasoning_content).toBeUndefined();
     expect(assistant.reasoning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Read: read_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("read_repo", () => {
+  test("read_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "hello.txt"), "line1\nline2\nline3\n");
+    const result = await executeReadRepo({ path: "hello.txt" }, cwd);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe("line1\nline2\nline3\n");
+    expect(result.details.lines_total).toBe(4); // trailing newline => 4 splits
+  });
+
+  test("read_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "/etc/passwd" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+    expect(result.details.path).toBe("/etc/passwd");
+  });
+
+  test("read_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "~/.aws/credentials" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("read_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "../escape.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("read_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "secret");
+    symlinkSync(join(outside, "secret.txt"), join(cwd, "link.txt"));
+    const result = await executeReadRepo({ path: "link.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("read_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    // The user-facing rejection path: a literal absolute path is OutsideRepo.
+    // The deny-list is the second wall, hit when realpath puts the resolved
+    // path into a deny-listed prefix (Linux). The platform-portable assertion
+    // is that the error is one of the rejection reasons in the §W2 taxonomy
+    // and the tool never returned content.
+    const cwd = makeCwd();
+    const result = await executeReadRepo(
+      { path: "/proc/self/environ" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+    // Negative property: the file's bytes are NOT in the response.
+    expect(JSON.stringify(result)).not.toContain("HOME=");
+  });
+
+  test("read_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    // Absolute /dev/null is rejected as OutsideRepo first.
+    const result = await executeReadRepo({ path: "/dev/null" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(["OutsideRepo", "DenyListedPath"]).toContain(result.details.error);
+  });
+
+  test("read_repo_returns_NotFound_for_missing_file_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "does-not-exist.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+describe("ensureWithinCwd", () => {
+  test("rejects empty string with InvalidArgument", () => {
+    const cwd = makeCwd();
+    const r = ensureWithinCwd("", cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("InvalidArgument");
   });
 });
