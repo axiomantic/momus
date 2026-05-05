@@ -69,6 +69,12 @@ jobs:
         uses: ./
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # Tell publish.py the GITHUB_TOKEN above is an App installation
+          # token, not the default `github-actions[bot]` token. Both 4xx
+          # on `gh api /user` so they cannot be distinguished at runtime;
+          # the workflow has to declare it. Without this, APPROVE
+          # verdicts get downgraded to COMMENT defensively.
+          MOMUS_USING_APP_TOKEN: "true"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: https://openrouter.ai/api/v1
           LLM_MODEL: deepseek/deepseek-v4-pro
