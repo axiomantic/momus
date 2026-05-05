@@ -35,10 +35,23 @@ jobs:
       checks: write
     runs-on: ubuntu-latest
     steps:
+      # Mint an installation token for the Momus GitHub App. Posting
+      # reviews via this token (instead of the default GITHUB_TOKEN's
+      # `github-actions[bot]` identity) lets APPROVE verdicts post as
+      # actual approvals — GitHub silently downgrades self-approvals
+      # from `github-actions[bot]` to COMMENT. SETUP.md §1 covers the
+      # constraint.
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.MOMUS_APP_ID }}
+          private-key: ${{ secrets.MOMUS_APP_PRIVATE_KEY }}
+
       - name: Resolve PR head SHA
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr_number }}"
           HEAD_SHA=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq .head.sha)
@@ -50,11 +63,12 @@ jobs:
         with:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Run momus
         uses: ./
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: https://openrouter.ai/api/v1
           LLM_MODEL: deepseek/deepseek-v4-pro
