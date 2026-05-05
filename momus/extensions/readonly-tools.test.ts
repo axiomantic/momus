@@ -19,6 +19,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  checkGitArgv,
   ensureWithinCwd,
   executeFindRepo,
   executeGrepRepo,
@@ -631,5 +632,130 @@ describe("ls_repo", () => {
     const result = await executeLsRepo({ path: "no-such-dir" }, cwd);
     expect(result.isError).toBe(true);
     expect(result.details.error).toBe("NotFound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Wrapper: bash_ro git-argv parser
+// ---------------------------------------------------------------------------
+
+describe("checkGitArgv", () => {
+  test("git_show_HEAD_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:src/foo.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_show_HEAD_absolute_path_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_show_HEAD_traversal_path_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:../escape.txt"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_cat_file_p_HEAD_etc_passwd_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "cat-file", "-p", "HEAD:/etc/passwd"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_log_p_dash_dash_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "f.py"), "");
+    const r = checkGitArgv(["git", "log", "-p", "--", "f.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_log_p_dash_dash_absolute_path_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "log", "-p", "--", "/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_blame_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "x.py"), "");
+    const r = checkGitArgv(["git", "blame", "--", "x.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_blame_absolute_path_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "blame", "--", "/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_status_succeeds_no_path_args", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "status"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_unsupported_subcommand_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "push", "origin", "main"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("UnsupportedGitSubcommand");
+  });
+
+  test("git_diff_no_index_rejected_UnsupportedGitOption", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "diff", "--no-index", "a.py", "b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("UnsupportedGitOption");
+  });
+
+  test("git_diff_two_paths_no_dashdash_rejected_AmbiguousDiffArgv", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.py"), "");
+    writeFileSync(join(cwd, "b.py"), "");
+    writeFileSync(join(cwd, "c.py"), "");
+    // 3 non-flag, non-ref-range positionals with no `--` => ambiguous.
+    const r = checkGitArgv(["git", "diff", "a.py", "b.py", "c.py"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AmbiguousDiffArgv");
+  });
+
+  test("git_diff_with_dashdash_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.py"), "");
+    writeFileSync(join(cwd, "b.py"), "");
+    const r = checkGitArgv(
+      ["git", "diff", "HEAD~1", "HEAD", "--", "a.py", "b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_diff_ref_range_succeeds", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "diff", "main..HEAD"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_show_two_ref_path_tokens_rejected_AmbiguousShowArgv", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "show", "HEAD:src/a.py", "HEAD~1:src/b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AmbiguousShowArgv");
   });
 });

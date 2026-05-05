@@ -418,6 +418,196 @@ export async function executeLsRepo(
   };
 }
 
+// ---------------------------------------------------------------------------
+// W2-Wrapper: bash_ro git-argv parser
+// ---------------------------------------------------------------------------
+
+const ALLOWED_GIT_SUBCMDS = new Set([
+  "log",
+  "show",
+  "diff",
+  "blame",
+  "rev-parse",
+  "ls-files",
+  "cat-file",
+  "status",
+  "ls-tree",
+  "describe",
+  "name-rev",
+  "merge-base",
+]);
+
+// Subcommands that take optional path positionals (uses `--` split rule).
+const PATH_ARG_SUBCMDS = new Set(["log", "diff", "blame"]);
+
+export type GitRejectReason =
+  | ErrorReason
+  | "UnsupportedGitSubcommand"
+  | "UnsupportedGitOption"
+  | "AmbiguousDiffArgv"
+  | "AmbiguousShowArgv";
+
+/**
+ * Validate a `git ...` argv against the design §W2 path-containment rules.
+ *
+ * Returns `{ ok: true }` for non-`git` argv (caller short-circuits) and for
+ * git argv whose paths all resolve inside cwd. Otherwise returns
+ * `{ ok: false, reason: <GitRejectReason> }` and the bash_ro handler
+ * synthesizes a non-zero exit without spawning git.
+ */
+export function checkGitArgv(
+  argv: string[],
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  if (argv[0] !== "git") return { ok: true };
+  const sub = argv[1];
+  if (!sub || !ALLOWED_GIT_SUBCMDS.has(sub)) {
+    return { ok: false, reason: "UnsupportedGitSubcommand" };
+  }
+  if (sub === "diff" && argv.includes("--no-index")) {
+    return { ok: false, reason: "UnsupportedGitOption" };
+  }
+  if (sub === "show" || sub === "cat-file") {
+    return checkRefColonPathArgv(argv, cwd);
+  }
+  if (PATH_ARG_SUBCMDS.has(sub)) {
+    return checkDashDashArgv(argv, cwd, sub);
+  }
+  // status, rev-parse, ls-files, ls-tree, describe, name-rev, merge-base:
+  // no per-arg path containment (refs are pseudo-paths resolved by git).
+  return { ok: true };
+}
+
+function checkDashDashArgv(
+  argv: string[],
+  cwd: string,
+  sub: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  // Find first standalone `--`.
+  const dashIdx = argv.indexOf("--", 2);
+  if (dashIdx >= 0) {
+    // Tokens after `--` are pathspecs. We use the lexical check (no
+    // realpath) because `git log -- some/file.py` is valid even when
+    // some/file.py does not currently exist on disk (e.g., the path was
+    // deleted in a later commit). We still reject absolute / ~/ /
+    // ../-traversal and any path that resolves outside cwd.
+    for (let i = dashIdx + 1; i < argv.length; i++) {
+      const tok = argv[i];
+      const r = ensureWithinCwdLexical(tok, cwd);
+      if (!r.ok) return { ok: false, reason: r.reason };
+    }
+    return { ok: true };
+  }
+  // No `--`: walk non-flag positionals.
+  //   - Any absolute or ~/ token is rejected outright (path attack
+  //     regardless of how many tokens are present). This handles
+  //     `git blame /etc/passwd` even though the design's rule 6 only
+  //     triggers on 3+ positionals; V3's matrix asserts the absolute-path
+  //     attack is rejected at any count, which is the safer behavior.
+  //   - Tokens containing `..` (e.g. `HEAD~1..HEAD`) are ref ranges.
+  //   - All other non-flag positionals (including bare names like
+  //     `README.md` or `HEAD`) are counted as ambiguous. If 2 or more
+  //     accumulate (for diff/log/blame), the caller must use `--`. This
+  //     is stricter than the design's literal "3+" but matches the V3
+  //     matrix and the conservative reading: when the model invokes diff
+  //     without `--`, there's no way for the wrapper to know whether
+  //     `a.md b.md` are two refs, two paths, or one of each, so we
+  //     refuse.
+  let ambiguous = 0;
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("-")) continue;
+    if (tok.startsWith("/") || tok.startsWith("~/") || tok === "~") {
+      return { ok: false, reason: "OutsideRepo" };
+    }
+    if (tok.includes("..")) continue; // ref range
+    ambiguous++;
+  }
+  if (ambiguous >= 2) {
+    return { ok: false, reason: "AmbiguousDiffArgv" };
+  }
+  // 0 or 1 ambiguous positional: treat as ref. No path containment to do.
+  void sub;
+  return { ok: true };
+}
+
+/**
+ * Lexical containment check. Like `ensureWithinCwd` but does NOT touch the
+ * filesystem (no realpath, no existsSync). Used for git ref:path syntax
+ * where the path component is a path inside git's tree, not on disk.
+ *
+ * Rejects: empty/non-string, absolute, ~/, paths that resolve outside cwd.
+ * Does NOT detect symlinks (no realpath available without filesystem
+ * touch); for ref:path arguments this is correct because git resolves the
+ * path against the rev's tree, not the worktree.
+ */
+function ensureWithinCwdLexical(
+  input: string,
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: ErrorReason } {
+  if (!input || typeof input !== "string") {
+    return { ok: false, reason: "InvalidArgument" };
+  }
+  if (input.startsWith("/")) return { ok: false, reason: "OutsideRepo" };
+  if (input === "~" || input.startsWith("~/")) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  const resolved = resolve(cwd, input);
+  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  return { ok: true };
+}
+
+function checkRefColonPathArgv(
+  argv: string[],
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  // For show/cat-file, look at non-flag positional tokens (argv[2:]). We
+  // expect at most one `<ref>:<path>` token; others must be refs (no `:`
+  // and no `..`) or `-p`-style flags.
+  //
+  // Ambiguity check fires BEFORE per-token containment so we always emit
+  // AmbiguousShowArgv when the user passes multiple ref:path tokens —
+  // even if one of those paths is itself outside cwd.
+  const positionals: string[] = [];
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("-")) continue;
+    positionals.push(tok);
+  }
+  let refColonCount = 0;
+  let nonRefColonCount = 0;
+  for (const tok of positionals) {
+    if (tok.includes(":")) refColonCount++;
+    else if (tok.includes("..")) {
+      // ref range — fine
+    } else nonRefColonCount++;
+  }
+  if (refColonCount > 1 || (refColonCount === 1 && nonRefColonCount > 0)) {
+    return { ok: false, reason: "AmbiguousShowArgv" };
+  }
+  // Containment check on the single ref:path's path component (lexical
+  // only; the path lives in git's tree, not on disk).
+  for (const tok of positionals) {
+    if (tok.includes(":")) {
+      const colonIdx = tok.indexOf(":");
+      const pathPart = tok.slice(colonIdx + 1);
+      const r = ensureWithinCwdLexical(pathPart, cwd);
+      if (!r.ok) return { ok: false, reason: r.reason };
+    }
+  }
+  return { ok: true };
+}
+
 class RejectError extends Error {}
 
 function tokenize(cmd: string): string[] {
@@ -678,6 +868,24 @@ export default function (pi: ExtensionAPI) {
               text: `rejected: '${bin}' not in allowlist (${[...ALLOWED_BINS].join(", ")})`,
             },
           ],
+          isError: true,
+        };
+      }
+
+      // W2-Wrapper: deterministic git-argv path containment. For non-git
+      // binaries this short-circuits {ok: true}.
+      const gitCheck = checkGitArgv(argv, process.cwd());
+      if (!gitCheck.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                `git path argument outside repo: ${gitCheck.reason}\n`,
+            },
+          ],
+          details: { exitCode: 2, gitArgvReject: gitCheck.reason },
           isError: true,
         };
       }
