@@ -1,0 +1,8 @@
+{
+  "owner": "test",
+  "repo": "momus-corpus",
+  "pr_number": 103,
+  "head_sha": "g2bdeadbeef00000000000000000000000000000",
+  "title": "Inline lookup_user query",
+  "author": "human-author"
+}
