@@ -23,13 +23,19 @@ _EVENT_LINE = '{"type": "complete", "ok": true}'
 _EVENT_PARSED = json.loads(_EVENT_LINE)
 
 
-def _setup_work_dir(tmp_path: Path, phase: str) -> Path:
-    """Create a work_dir with a stub prompt file and outputs/ subdir."""
-    work_dir = tmp_path / "work"
+def _setup_work_dir(tmp_path: Path, phase: str) -> tuple[Path, Path]:
+    """Create a repo_root and a work_dir under it, plus a stub prompt.
+
+    Returns ``(work_dir, repo_root)``. ``repo_root`` is ``tmp_path``;
+    ``work_dir`` is ``tmp_path/work`` so ``work_dir.relative_to(repo_root)``
+    is well-defined for the orchestrator's CWD-and-env wiring.
+    """
+    repo_root = tmp_path
+    work_dir = repo_root / "work"
     (work_dir / "inputs" / "prompts").mkdir(parents=True)
     (work_dir / "outputs").mkdir(parents=True)
     (work_dir / "inputs" / "prompts" / f"{phase}.md").write_text("stub prompt")
-    return work_dir
+    return work_dir, repo_root
 
 
 class _FakePopen:
@@ -89,7 +95,7 @@ def _llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel, write_on_calls={1}
     )
@@ -98,7 +104,7 @@ def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
     run_mock.calls(side_effect)
 
     with tripwire:
-        events = invoke_pi_phase_with_retry(phase, work_dir)
+        events = invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     assert events == [_EVENT_PARSED]
     assert state["calls"] == 1
@@ -115,7 +121,7 @@ def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
 def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     # Only the second call writes the file.
     side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel, write_on_calls={2}
@@ -125,7 +131,7 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     run_mock.calls(side_effect).calls(side_effect)
 
     with tripwire:
-        events = invoke_pi_phase_with_retry(phase, work_dir)
+        events = invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     # Returned events come from the second (successful) call.
     assert events == [_EVENT_PARSED]
@@ -138,12 +144,15 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     second_prompt = second_cmd[second_cmd.index("-p") + 1]
 
     assert first_prompt == "stub prompt"
+    # The reminder cites the path the model must pass to write_output,
+    # which is relative to pi's CWD (= repo_root): work_dir_rel / expected_rel.
+    expected_rel_to_cwd = str(work_dir.relative_to(repo_root) / expected_rel)
     expected_suffix = (
         "\n\n---\n"
         "CRITICAL REMINDER: You MUST invoke the `write_output` tool to write "
-        f"`{expected_rel}`. Your previous attempt ended without writing this "
-        "file. Do NOT respond with prose only; call `write_output` before "
-        "ending your turn."
+        f"`{expected_rel_to_cwd}`. Your previous attempt ended without writing "
+        "this file. Do NOT respond with prose only; call `write_output` "
+        "before ending your turn."
     )
     assert second_prompt == "stub prompt" + expected_suffix
 
@@ -154,7 +163,7 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
 def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     # Neither call writes the file.
     side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel, write_on_calls=set()
@@ -165,7 +174,7 @@ def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
 
     with tripwire:
         with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir)
+            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     assert state["calls"] == 2
     assert len(captured) == 2
@@ -182,7 +191,7 @@ def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
 def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel, write_on_calls=set(), returncode=2
     )
@@ -192,7 +201,7 @@ def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
 
     with tripwire:
         with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir)
+            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     # Pre-existing behavior: non-zero exit raises immediately, no retry.
     assert state["calls"] == 1
@@ -212,7 +221,7 @@ def test_provider_error_in_message_end_raises(tmp_path: Path) -> None:
     failure. The orchestrator should now raise immediately.
     """
     phase = "phase2"
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
 
     error_stream = (
         '{"type": "session"}\n'
@@ -240,7 +249,7 @@ def test_provider_error_in_message_end_raises(tmp_path: Path) -> None:
 
     with tripwire:
         with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir)
+            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     # Single call — no retry on provider error.
     assert state["calls"] == 1
@@ -255,7 +264,7 @@ def test_provider_error_in_message_end_raises(tmp_path: Path) -> None:
 def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
     """invoke_pi_phase (the unguarded variant) does not check files."""
     phase = "phase2"
-    work_dir = _setup_work_dir(tmp_path, phase)
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     # No file is ever written, but the unguarded function just returns events.
     side_effect, state, captured = _fake_pi_factory(
         work_dir, expected_rel_path=None, write_on_calls=set()
@@ -265,7 +274,7 @@ def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
     run_mock.calls(side_effect)
 
     with tripwire:
-        events = invoke_pi_phase(phase, work_dir)
+        events = invoke_pi_phase(phase, work_dir, repo_root)
 
     assert events == [_EVENT_PARSED]
     assert state["calls"] == 1
@@ -273,6 +282,57 @@ def test_phase_not_in_expected_outputs_skips_guard(tmp_path: Path) -> None:
 
     args, kwargs = captured[0]
     run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_pi_spawned_with_cwd_repo_root_and_workdir_env(tmp_path: Path) -> None:
+    """Pi must run with cwd=repo_root (so its built-in tools resolve repo
+    files via plain relative paths) and MOMUS_WORK_DIR pointing at the
+    work_dir relative to repo_root (so the readonly-tools extension's
+    write_output knows the allowed prefix). Regression for the
+    ``.momus/<repo-path>`` ENOENT bug.
+    """
+    phase = "phase2"
+    expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
+    side_effect, state, captured = _fake_pi_factory(
+        work_dir, expected_rel, write_on_calls={1}
+    )
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect)
+
+    with tripwire:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+
+    assert state["calls"] == 1
+    args, kwargs = captured[0]
+    assert kwargs["cwd"] == repo_root
+    env = kwargs["env"]
+    assert env["MOMUS_WORK_DIR"] == str(work_dir.relative_to(repo_root))
+
+    run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_invoke_pi_phase_rejects_work_dir_outside_repo_root(tmp_path: Path) -> None:
+    """work_dir must live under repo_root; a sibling path makes
+    work_dir.relative_to(repo_root) raise inside _build_pi_env. The
+    orchestrator validates this earlier with a clearer error, but
+    invoke_pi_phase running with a misconfigured pair must not silently
+    succeed and re-introduce the CWD/path-resolution split.
+    """
+    phase = "phase2"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    work_dir = tmp_path / "work-elsewhere"
+    (work_dir / "inputs" / "prompts").mkdir(parents=True)
+    (work_dir / "inputs" / "prompts" / f"{phase}.md").write_text("stub prompt")
+    (work_dir / "outputs").mkdir()
+
+    # No tripwire mock: ValueError is expected to fire before subprocess
+    # spawn, so any installed mock would be unused and the harness would
+    # fail with UnusedMocksError instead of the assertion we care about.
+    with pytest.raises(ValueError):
+        invoke_pi_phase(phase, work_dir, repo_root)
 
 
 def test_phase_expected_outputs_mapping_is_exactly_three_phases() -> None:

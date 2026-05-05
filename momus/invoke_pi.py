@@ -39,15 +39,20 @@ class PiInvocationError(RuntimeError):
 def invoke_pi_phase(
     phase: str,
     work_dir: Path,
+    repo_root: Path,
     extra_prompt_suffix: str | None = None,
     on_tool_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """
-    Run a phase. ``work_dir`` is the CWD pi will see (must contain the
-    repo checkout, plus inputs/ and outputs/ subdirs).
+    Run a phase. ``repo_root`` is pi's CWD: the repo checkout, where pi's
+    built-in tools (read, ls, grep, find) and bash_ro resolve relative
+    paths. ``work_dir`` is where inputs/ and outputs/ live; it MUST be a
+    subdirectory of ``repo_root`` (validated by the orchestrator). Its
+    location relative to repo_root is forwarded to the extension via
+    ``MOMUS_WORK_DIR`` so write_output knows the allowed outputs prefix.
 
     Returns the list of parsed pi events from the JSON stream. The phase's
-    real output is whatever it wrote to ``outputs/``.
+    real output is whatever it wrote under ``work_dir/outputs/``.
     """
     prompt_path = work_dir / "inputs" / "prompts" / f"{phase}.md"
     if not prompt_path.exists():
@@ -59,7 +64,7 @@ def invoke_pi_phase(
     tools = PHASE_TOOL_ALLOWLISTS[phase]
     cmd = _build_pi_command(prompt, tools)
 
-    env = _build_pi_env()
+    env = _build_pi_env(work_dir, repo_root)
 
     # Stream pi's output line-by-line so the orchestrator's stderr (and
     # therefore the GitHub Actions log) shows progress in real time. Pi's
@@ -74,7 +79,7 @@ def invoke_pi_phase(
     stderr_tail: list[str] = []
     with subprocess.Popen(
         cmd,
-        cwd=work_dir,
+        cwd=repo_root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -291,6 +296,7 @@ def _extract_result_text(result: dict) -> str:
 def invoke_pi_phase_with_retry(
     phase: str,
     work_dir: Path,
+    repo_root: Path,
     on_tool_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """
@@ -299,7 +305,9 @@ def invoke_pi_phase_with_retry(
     calling ``write_output``), retry once with a hard reminder appended to
     the prompt. Phases not in ``PHASE_EXPECTED_OUTPUTS`` skip the guard.
     """
-    events = invoke_pi_phase(phase, work_dir, on_tool_complete=on_tool_complete)
+    events = invoke_pi_phase(
+        phase, work_dir, repo_root, on_tool_complete=on_tool_complete
+    )
     expected_rel = PHASE_EXPECTED_OUTPUTS.get(phase)
     if expected_rel is None:
         return events
@@ -310,16 +318,22 @@ def invoke_pi_phase_with_retry(
 
     # The model likely returned prose instead of calling write_output. Nudge
     # it once with an explicit reminder; keep the suffix terse on purpose.
+    # The reminder cites the path relative to pi's CWD (repo_root) so the
+    # path the model must pass to write_output matches the path in the
+    # reminder verbatim.
+    work_dir_rel = work_dir.relative_to(repo_root)
+    expected_rel_to_cwd = str(work_dir_rel / expected_rel)
     suffix = (
         "\n\n---\n"
         "CRITICAL REMINDER: You MUST invoke the `write_output` tool to write "
-        f"`{expected_rel}`. Your previous attempt ended without writing this "
-        "file. Do NOT respond with prose only; call `write_output` before "
-        "ending your turn."
+        f"`{expected_rel_to_cwd}`. Your previous attempt ended without writing "
+        "this file. Do NOT respond with prose only; call `write_output` "
+        "before ending your turn."
     )
     events = invoke_pi_phase(
         phase,
         work_dir,
+        repo_root,
         extra_prompt_suffix=suffix,
         on_tool_complete=on_tool_complete,
     )
@@ -364,9 +378,19 @@ def _build_pi_command(prompt: str, tools: list[str]) -> list[str]:
     return cmd
 
 
-def _build_pi_env() -> dict[str, str]:
-    """Forward env to pi. The harness has LLM_API_KEY; pi consumes it."""
+def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
+    """Forward env to pi.
+
+    Adds ``MOMUS_WORK_DIR``: the work_dir's path relative to repo_root.
+    The readonly-tools extension reads it to allow `write_output` paths
+    under ``<MOMUS_WORK_DIR>/outputs/`` (e.g. ``.momus/outputs/...``).
+    Pi runs with cwd=repo_root, so this is also the prefix the model
+    must use in tool args to reference inputs/outputs from CWD.
+
+    LLM_API_KEY is forwarded through; pi consumes it.
+    """
     env = dict(os.environ)
+    env["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
     return env
 
 

@@ -37,7 +37,15 @@ const ALLOWED_BINS = new Set([
   "grep",
 ]);
 
-const OUTPUTS_DIR = "outputs";
+// `MOMUS_WORK_DIR` is set by the orchestrator (momus/invoke_pi.py) to
+// the work_dir's path relative to repo_root (e.g. ".momus"). Pi runs
+// with cwd=repo_root, so write_output's allowed prefix follows the
+// work_dir into wherever the orchestrator placed it. Falling back to a
+// bare "outputs" keeps the extension usable when invoked outside momus
+// (manual `pi -e ...` runs, tests).
+const OUTPUTS_DIR = process.env.MOMUS_WORK_DIR
+  ? `${process.env.MOMUS_WORK_DIR}/outputs`
+  : "outputs";
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -286,15 +294,15 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "write_output",
-    label: "write (outputs/ only)",
+    label: `write (${OUTPUTS_DIR}/ only)`,
     description:
-      "Write content to a file under outputs/ relative to CWD. Use this " +
-      "to emit phase artifacts like findings.json. Any path outside " +
-      "outputs/ is rejected.",
+      `Write content to a file under ${OUTPUTS_DIR}/ relative to CWD. ` +
+      "Use this to emit phase artifacts like findings.json. Any path " +
+      `outside ${OUTPUTS_DIR}/ is rejected.`,
     parameters: Type.Object({
       path: Type.String({
         description:
-          "Path under outputs/, e.g. 'outputs/findings.json'. " +
+          `Path under ${OUTPUTS_DIR}/, e.g. '${OUTPUTS_DIR}/findings.json'. ` +
           "Must not contain '..' segments.",
       }),
       content: Type.String({ description: "File contents." }),

@@ -54,6 +54,22 @@ def _run(
     work_dir = Path(args.work_dir).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # Pi runs with cwd=repo_root so its built-in file tools (read, ls,
+    # grep, find) and bash_ro resolve relative paths against the repo
+    # checkout. work_dir holds inputs/outputs and MUST live inside
+    # repo_root so the model can reference them via a relative path that
+    # is well-defined from CWD. Reject configurations that put work_dir
+    # outside repo_root rather than silently re-introducing the
+    # path-resolution split that this entrypoint was rewritten to fix.
+    try:
+        work_dir_rel = work_dir.relative_to(repo_root)
+    except ValueError:
+        raise SystemExit(
+            f"--work-dir ({work_dir}) must be inside --repo-root "
+            f"({repo_root}); pi runs from repo_root and references "
+            "inputs/outputs via a relative path."
+        )
+
     config = load_config(repo_root)
 
     # Per-repo provider overrides take precedence over the workflow's
@@ -74,7 +90,7 @@ def _run(
 
     pr_meta["run_id"] = _compute_run_id(prior_threads, config.review.run_id_scheme)
 
-    inputs_dir = prep_inputs(repo_root, work_dir, pr_meta, config)
+    inputs_dir = prep_inputs(repo_root, work_dir, work_dir_rel, pr_meta, config)
     (inputs_dir / "prior-threads.json").write_text(
         json.dumps(prior_threads, indent=2)
     )
@@ -130,6 +146,7 @@ def _run(
         invoke_pi_phase_with_retry(
             "phase1",
             work_dir,
+            repo_root,
             on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
         )
         tracker.finish("phase1")
@@ -147,6 +164,7 @@ def _run(
     invoke_pi_phase_with_retry(
         "phase2",
         work_dir,
+        repo_root,
         on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
     )
     tracker.finish("phase2")
@@ -177,6 +195,7 @@ def _run(
         invoke_pi_phase_with_retry(
             "phase3",
             work_dir,
+            repo_root,
             on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
         )
         tracker.finish("phase3")

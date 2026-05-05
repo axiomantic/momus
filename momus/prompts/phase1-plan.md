@@ -15,7 +15,7 @@ You are NOT here to:
 
 ## Input
 
-`inputs/prior-threads.json` — array, one entry per still-unresolved bot
+`<<WORK_DIR>>/inputs/prior-threads.json` — array, one entry per still-unresolved bot
 finding from previous runs:
 
 ```json
@@ -41,7 +41,7 @@ Resolved threads are pre-classified by the runner and not present here.
 ## Tools
 
 You should not need tools for this phase. Everything is in
-`inputs/prior-threads.json`. Do not call `Read`, `Grep`, or `Bash` unless
+`<<WORK_DIR>>/inputs/prior-threads.json`. Do not call `Read`, `Grep`, or `Bash` unless
 a reply explicitly references code you need to disambiguate, and even
 then prefer leaving the status as `PENDING` over over-classifying.
 
@@ -77,7 +77,7 @@ then prefer leaving the status as `PENDING` over over-classifying.
 
 ## Output
 
-Write `outputs/prior-findings.json`. Strict shape:
+Write `<<WORK_DIR>>/outputs/prior-findings.json`. Strict shape:
 
 ```json
 [

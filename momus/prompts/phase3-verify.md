@@ -13,18 +13,20 @@ issue. Be conservative: when in doubt, demote or drop.
 
 ## Input
 
-- `outputs/findings.json` — phase 2 output. You may have noticed the
+- `<<WORK_DIR>>/outputs/findings.json` — phase 2 output. You may have noticed the
   runner has already nuked findings that cite lines that don't exist in
   the cited file, and demoted findings whose severity exceeded the prior
   severity for the same location without quoted new evidence. The
   remaining findings still need judgment audit.
-- `inputs/prior-findings.json` — prior-findings classifications, same as
+- `<<WORK_DIR>>/inputs/prior-findings.json` — prior-findings classifications, same as
   phase 2 saw.
-- `inputs/conventions.md`, `inputs/diff.patch`, `inputs/pr-meta.json` —
+- `<<WORK_DIR>>/inputs/conventions.md`, `<<WORK_DIR>>/inputs/diff.patch`, `<<WORK_DIR>>/inputs/pr-meta.json` —
   same as phase 2.
 
-The repository is checked out at the PR head SHA in the working
-directory.
+The repository checkout at the PR head SHA is your working directory.
+Read repo files via plain relative paths (e.g. `src/foo.rs`). The
+inputs listed above live under `<<WORK_DIR>>/inputs/`; the outputs you
+rewrite go under `<<WORK_DIR>>/outputs/`.
 
 ## Tools
 
@@ -38,7 +40,7 @@ directory.
 
 ## Audit checks
 
-For each finding in `outputs/findings.json`, perform these checks in
+For each finding in `<<WORK_DIR>>/outputs/findings.json`, perform these checks in
 order:
 
 1. **Citation accuracy.** `Read` the cited file at the cited line range.
@@ -62,7 +64,7 @@ order:
 
 4. **Declined-finding immunity.** If the finding raises a concern within
    10 lines of a prior finding marked `DECLINED` in
-   `inputs/prior-findings.json` and addresses substantially the same
+   `<<WORK_DIR>>/inputs/prior-findings.json` and addresses substantially the same
    issue, DROP it unless the finding explicitly quotes new evidence
    introduced in this PR's commits. The bot does not get to overturn a
    human decline by re-asserting the same concern.
@@ -94,7 +96,7 @@ You MUST write BOTH files below via `write_output`. Both writes are
 required on every run, including runs where the audit makes no changes
 to the findings. Skipping either write is a defect.
 
-### `outputs/findings.json` (rewritten) — REQUIRED
+### `<<WORK_DIR>>/outputs/findings.json` (rewritten) — REQUIRED
 
 Same shape as phase 2's output. Apply the audit decisions: drop dropped
 findings, demote demoted ones, strip invalid suggestions, merge
@@ -103,12 +105,12 @@ duplicates. Recompute `tally` to match the surviving findings. Recompute
 blocking finding present or any non-DECLINED prior unfixed; otherwise
 APPROVE per first-review policy).
 
-If the audit changed nothing, still re-emit `outputs/findings.json` with
+If the audit changed nothing, still re-emit `<<WORK_DIR>>/outputs/findings.json` with
 the original phase 2 content unchanged.
 
-### `outputs/audit-log.json` — REQUIRED (always)
+### `<<WORK_DIR>>/outputs/audit-log.json` — REQUIRED (always)
 
-After completing the audit, you MUST emit `outputs/audit-log.json` via
+After completing the audit, you MUST emit `<<WORK_DIR>>/outputs/audit-log.json` via
 `write_output`. This file is required even if you made zero changes —
 in that case, emit a minimal record with an empty `actions` array and a
 `summary` noting no changes were made. Do NOT omit this file under any
@@ -152,8 +154,8 @@ ignores future reviews). Default toward demote/drop.
 
 ## Output checklist (all required)
 
-- [ ] `outputs/findings.json` written via `write_output`
-- [ ] `outputs/audit-log.json` written via `write_output`
+- [ ] `<<WORK_DIR>>/outputs/findings.json` written via `write_output`
+- [ ] `<<WORK_DIR>>/outputs/audit-log.json` written via `write_output`
 
 Both writes are mandatory on every run. Do not finish until both have
 been emitted.

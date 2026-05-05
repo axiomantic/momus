@@ -14,11 +14,17 @@ from .render import render_phase_prompt
 def prep_inputs(
     repo_root: Path,
     work_dir: Path,
+    work_dir_rel: Path,
     pr_meta: dict[str, Any],
     config: Config,
 ) -> Path:
     """
     Materialize all inputs for the LLM phases under ``work_dir/inputs``.
+
+    ``work_dir_rel`` is ``work_dir`` expressed relative to ``repo_root``
+    (e.g. ``Path(".momus")``). It is substituted into the rendered phase
+    prompts so the model references inputs/outputs as
+    ``<work_dir_rel>/inputs/...`` from pi's CWD (= repo_root).
 
     Returns the inputs directory path.
     """
@@ -37,7 +43,7 @@ def prep_inputs(
     prompts_dir.mkdir(exist_ok=True)
     run_id = pr_meta.get("run_id", "A")
     for phase in ("phase1", "phase2", "phase3"):
-        rendered = render_phase_prompt(phase, config, run_id)
+        rendered = render_phase_prompt(phase, config, run_id, work_dir_rel)
         (prompts_dir / f"{phase}.md").write_text(rendered)
 
     return inputs_dir
