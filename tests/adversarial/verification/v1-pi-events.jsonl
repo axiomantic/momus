@@ -1,0 +1,1 @@
+{"_note": "FALLBACK mode — no end-to-end pi event stream captured because LLM_BASE_URL/LLM_MODEL not set in worktree env. See v1-pi-shape.json evidence field for hand-verification details against pi v0.72.1 dist/core/extensions/types.d.ts."}

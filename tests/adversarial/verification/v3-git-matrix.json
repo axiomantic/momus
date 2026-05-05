@@ -1,0 +1,258 @@
+{
+  "status": "PASS",
+  "n_rows": 15,
+  "legitimate_rejected": [],
+  "attack_allowed": [],
+  "rows": [
+    {
+      "description": "git_show_HEAD_relative_path_succeeds",
+      "argv": [
+        "git",
+        "show",
+        "HEAD:README.md"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "# momus\\n\\nThorough AI code review as a GitHub Action.\\n\\nProvider-agnostic: works with any OpenAI-compatible LLM (OpenRoute",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_show_HEAD_absolute_path_rejected_OutsideRepo",
+      "argv": [
+        "git",
+        "show",
+        "HEAD:/etc/passwd"
+      ],
+      "attack_class": "absolute_path",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "OutsideRepo",
+      "today_actual_behavior": {
+        "exit_code": 128,
+        "stdout_head": "",
+        "stderr_head": "fatal: path '/etc/passwd' exists on disk, but not in 'HEAD'\\n"
+      }
+    },
+    {
+      "description": "git_show_HEAD_traversal_path_rejected_OutsideRepo",
+      "argv": [
+        "git",
+        "show",
+        "HEAD:../../../etc/passwd"
+      ],
+      "attack_class": "traversal",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "OutsideRepo",
+      "today_actual_behavior": {
+        "exit_code": 128,
+        "stdout_head": "",
+        "stderr_head": "fatal: '../../../etc/passwd' is outside repository at '/Users/eek/Development/worktrees/momus-injection-hardening/momus'"
+      }
+    },
+    {
+      "description": "git_cat_file_p_HEAD_etc_passwd_rejected_OutsideRepo",
+      "argv": [
+        "git",
+        "cat-file",
+        "-p",
+        "HEAD:/etc/passwd"
+      ],
+      "attack_class": "absolute_path",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "OutsideRepo",
+      "today_actual_behavior": {
+        "exit_code": 128,
+        "stdout_head": "",
+        "stderr_head": "fatal: path '/etc/passwd' exists on disk, but not in 'HEAD'\\n"
+      }
+    },
+    {
+      "description": "git_log_p_dash_dash_relative_path_succeeds",
+      "argv": [
+        "git",
+        "log",
+        "-p",
+        "--",
+        "README.md"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "commit 964dc8c10b243b74c2e259921963f219236dfbc4\\nAuthor: elijahr <153711+elijahr@users.noreply.github.com>\\nDate:   Mon Ma",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_log_p_dash_dash_absolute_path_rejected",
+      "argv": [
+        "git",
+        "log",
+        "-p",
+        "--",
+        "/etc/passwd"
+      ],
+      "attack_class": "absolute_path",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "OutsideRepo",
+      "today_actual_behavior": {
+        "exit_code": 128,
+        "stdout_head": "",
+        "stderr_head": "fatal: /etc/passwd: '/etc/passwd' is outside repository at '/Users/eek/Development/worktrees/momus-injection-hardening/m"
+      }
+    },
+    {
+      "description": "git_blame_relative_path_succeeds",
+      "argv": [
+        "git",
+        "blame",
+        "README.md"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "^bbc7107 (elijahr 2026-05-02 23:57:41 -0500  1) # momus\\n^bbc7107 (elijahr 2026-05-02 23:57:41 -0500  2) \\nc2202560 (elija",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_blame_absolute_path_rejected",
+      "argv": [
+        "git",
+        "blame",
+        "/etc/passwd"
+      ],
+      "attack_class": "absolute_path",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "OutsideRepo",
+      "today_actual_behavior": {
+        "exit_code": 128,
+        "stdout_head": "",
+        "stderr_head": "fatal: '/etc/passwd' is outside repository at '/Users/eek/Development/worktrees/momus-injection-hardening/momus'\\n"
+      }
+    },
+    {
+      "description": "git_status_succeeds_no_path_args",
+      "argv": [
+        "git",
+        "status"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "On branch injection-hardening\\nUntracked files:\\n  (use \"git add <file>...\" to include in what will be committed)\\n\ttests/a",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_unsupported_subcommand_rejected",
+      "argv": [
+        "git",
+        "push",
+        "origin",
+        "main"
+      ],
+      "attack_class": "unsupported_subcommand",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "UnsupportedGitSubcommand",
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "",
+        "stderr_head": "Everything up-to-date\\n"
+      }
+    },
+    {
+      "description": "git_diff_no_index_rejected_UnsupportedGitOption",
+      "argv": [
+        "git",
+        "diff",
+        "--no-index",
+        "/etc/passwd",
+        "/tmp/x"
+      ],
+      "attack_class": "no_index",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "UnsupportedGitOption",
+      "today_actual_behavior": {
+        "exit_code": 1,
+        "stdout_head": "",
+        "stderr_head": "error: Could not access '/tmp/x'\\n"
+      }
+    },
+    {
+      "description": "git_diff_two_paths_no_dashdash_rejected_AmbiguousDiffArgv",
+      "argv": [
+        "git",
+        "diff",
+        "README.md",
+        "pyproject.toml"
+      ],
+      "attack_class": "ambiguous_argv",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "AmbiguousDiffArgv",
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_diff_with_dashdash_succeeds",
+      "argv": [
+        "git",
+        "diff",
+        "--",
+        "README.md"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_diff_ref_range_succeeds",
+      "argv": [
+        "git",
+        "diff",
+        "HEAD~1..HEAD"
+      ],
+      "attack_class": null,
+      "would_be_rejected_by_wrapper": false,
+      "reject_reason": null,
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "diff --git a/pyproject.toml b/pyproject.toml\\nindex c1f4187..62ac27b 100644\\n--- a/pyproject.toml\\n+++ b/pyproject.toml\\n@@ ",
+        "stderr_head": ""
+      }
+    },
+    {
+      "description": "git_show_two_ref_path_tokens_rejected_AmbiguousShowArgv",
+      "argv": [
+        "git",
+        "show",
+        "HEAD:README.md",
+        "HEAD:pyproject.toml"
+      ],
+      "attack_class": "ambiguous_show",
+      "would_be_rejected_by_wrapper": true,
+      "reject_reason": "AmbiguousShowArgv",
+      "today_actual_behavior": {
+        "exit_code": 0,
+        "stdout_head": "# momus\\n\\nThorough AI code review as a GitHub Action.\\n\\nProvider-agnostic: works with any OpenAI-compatible LLM (OpenRoute",
+        "stderr_head": ""
+      }
+    }
+  ]
+}

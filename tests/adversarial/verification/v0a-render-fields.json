@@ -1,0 +1,1 @@
+{"status": "PASS", "rendered_keys": {"CALIBRATION_PROCEDURE": true, "CALIBRATION_FIELD": true, "NIT_SCALE_LINE": true, "EMIT_NITS_ANTIPATTERN": false, "NOTEWORTHY_FIELD": true, "APPROVE_RULE": true, "FIRST_REVIEW_APPROVE_RULE": true, "ID_SCHEME": true}, "json_fields": ["calibration", "noteworthy"]}
