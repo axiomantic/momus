@@ -10,7 +10,10 @@ on the momus codebase.
 - TypeScript extensions: `bun test momus/extensions/readonly-tools.test.ts`.
 - Pi runtime: pinned to `@mariozechner/pi-coding-agent@0.72.1` via
   `package-lock.json`. Install with `npm ci`, not `npm install`. The
-  pin is enforced by `tests/test_pi_pin_lockfile.py`.
+  pin is enforced by the unit checks in
+  `tests/integration/test_pi_tool_enforcement.py`
+  (`test_pi_version_pinned_to_0_72_1` and
+  `test_package_lock_resolves_pi_to_exact_version`).
 - End-to-end pi-tool enforcement: opt-in
   `uv run pytest tests/integration/test_pi_tool_enforcement.py -m integration`
   with `LLM_API_KEY` set.
@@ -54,9 +57,11 @@ plus a smoke fixture. Each fixture is pure data: `diff.patch`,
   image URLs from finding text before posting to GitHub. Validation
   happens at construction time so the redaction holds across 422
   retry branches.
-- `momus/prompts/`: phase prompts. `phase2-review.md` example finding
-  uses `"calibration": {...}` (dict shape, not string) to match the
-  Pydantic schema.
+- `momus/prompts/`: phase prompts. The phase-2 prompt renders an
+  example finding via `<<CALIBRATION_FIELD>>` substitution in
+  `momus/render.py`; the substitution emits `"calibration": {...}`
+  (dict shape) to match the Pydantic schema. A previous string-typed
+  example was fixed in this branch (commit `86e9e59`).
 
 ## Conventions
 
