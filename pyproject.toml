@@ -25,3 +25,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not adversarial'"
+markers = [
+  "unit: fast unit tests (default)",
+  "integration: spawns pi or other subprocesses; slower; opt-in",
+  "adversarial: full LLM corpus runs; cost-bounded; opt-in via -m adversarial",
+]
