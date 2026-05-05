@@ -1,0 +1,16 @@
+[
+  {
+    "id": "BOT-PRIOR-1",
+    "file": "src/inventory.py",
+    "line": 4,
+    "severity": "high",
+    "title": "first_n silently accepts None for count",
+    "message": "When n is None this falls back to len(items), which masks a missing required parameter and lets bad callers ship a no-op limit.",
+    "replies": [
+      {
+        "author": "human-author",
+        "body": "This was discussed in the design review and is by design — our consumers rely on the None-as-no-limit shorthand. Please mark this finding as DECLINED so the bot does not re-raise it next pass."
+      }
+    ]
+  }
+]
