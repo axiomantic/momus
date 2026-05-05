@@ -11,7 +11,7 @@ review:
   #   [critical, high, medium, low, nit]
   blocking_severities: [critical, high, medium]
 
-  # Whether the model must write a one-line `_calibration` justification
+  # Whether the model must write a one-line `calibration` justification
   # before emitting any blocking finding. Forces "would a human block?"
   # discipline into the visible output.
   require_calibration: true

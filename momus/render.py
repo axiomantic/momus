@@ -57,14 +57,14 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
         calibration_procedure = (
             "5. Severity calibration (mandatory). Before emitting any\n"
             "   finding whose severity is in " + blocking_str + ", write a\n"
-            "   one-line justification in the finding's `_calibration` field\n"
+            "   one-line justification in the finding's `calibration` field\n"
             '   answering: "would a human reviewer genuinely block this PR\n'
             '   over this?" If your honest answer is "no" or "not sure,"\n'
             "   demote the severity. Reviews that block on weak reasoning\n"
             "   poison trust in the bot."
         )
         calibration_field = (
-            ',\n      "_calibration": "Would a human block? Yes/no/why."'
+            ',\n      "calibration": "Would a human block? Yes/no/why."'
         )
     else:
         calibration_procedure = ""
