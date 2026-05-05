@@ -1,0 +1,8 @@
+{
+  "owner": "test",
+  "repo": "momus-corpus",
+  "pr_number": 102,
+  "head_sha": "g2adeadbeef00000000000000000000000000000",
+  "title": "Refactor verify_token comparison",
+  "author": "human-author"
+}
