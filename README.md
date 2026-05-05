@@ -35,15 +35,39 @@ Phases 1, 2, 3 are LLM calls. Phase 4 is pure code.
 ## Harness
 
 [pi](https://github.com/badlogic/pi-mono) (`@mariozechner/pi-coding-agent`)
-runs each LLM phase. We supply a custom extension
-(`extensions/readonly-tools.ts`) that exposes:
+runs each LLM phase. The pi version is pinned via `package-lock.json`;
+install with `npm ci` rather than `npm install` to honor the pin.
 
-- `bash_ro` — shell with allowlisted binaries (`git`, `gh`, `cat`,
-  `head`, `tail`, `wc`, `find`, `rg`, `ls`); rejects shell metacharacters
-- `write_output` — restricted to writing under `outputs/`
+We supply a custom extension (`extensions/readonly-tools.ts`) that
+exposes:
 
-Plus pi's built-in `read`, `grep`, `find`, `ls` (read-only). Built-in
-`bash`, `write`, `edit` are excluded via `--tools` allowlist.
+- `bash_ro`: shell with allowlisted binaries (`git`, `cat`, `head`,
+  `tail`, `wc`, `find`, `rg`, `ls`); rejects shell metacharacters and
+  walks `git` argv to keep paths inside the worktree. `gh` is invoked
+  from Python pre-pi (`fetch_priors.py`); the LLM phases never need
+  it, so it was removed from the allowlist in v1.1.0.
+- `write_output`: restricted to writing under `outputs/`, with realpath
+  containment so symlink swaps cannot redirect writes.
+- `read_repo` / `grep_repo` / `find_repo` / `ls_repo`: cwd-contained
+  replacements for pi's built-in read/grep/find/ls. Pi's built-ins are
+  excluded via the `--tools` allowlist so the LLM cannot escape the
+  worktree.
+
+Built-in `bash`, `write`, `edit` are also excluded via `--tools`.
+
+## Environment scoping
+
+The bot runs pi in a process with a **default-deny env allowlist**:
+only a small set of variables (`HOME`, `PATH`, `LLM_*`,
+`GITHUB_REPOSITORY`, etc.) is forwarded to the pi child. Anything else
+on the runner environment is scrubbed before the LLM phases start.
+
+If your fork or extension needs a custom env var inside pi, set
+`MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2` on the workflow job. Each name
+is added to the allowlist and forwarded as-is. **This is an opt-in
+escape hatch; review what you pass through.** It bypasses the hardening
+that prevents prompt-injected pi runs from reading credentials from
+sibling env vars.
 
 ## Configuration
 
