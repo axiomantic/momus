@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -522,3 +524,187 @@ def test_phase_allowlists_omit_pi_builtins():
     for ph in ("phase2", "phase3"):
         for forbidden in ("read", "grep", "find", "ls", "edit", "write", "bash"):
             assert forbidden not in PHASE_TOOL_ALLOWLISTS[ph]
+
+
+# ---------------------------------------------------------------------------
+# W3-EnvAllowlist: default-deny env passed to pi subprocess.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _scrubbed_env(monkeypatch):
+    """Reset the ambient env to a known minimal state.
+
+    Keeps only PATH/HOME/TMPDIR (needed by Python itself + tmp_path); every
+    other key is removed so individual W3 tests can assert presence/absence
+    of specific keys without ambient-noise interference.
+    """
+    keep = {"PATH", "HOME", "TMPDIR"}
+    for k in list(os.environ.keys()):
+        if k not in keep:
+            monkeypatch.delenv(k, raising=False)
+
+
+def test_pi_env_includes_path_home_lang(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("PATH")
+    assert env.get("HOME")
+    assert env.get("LANG") == "en_US.UTF-8"
+
+
+def test_pi_env_excludes_github_token(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "GITHUB_TOKEN" not in env
+
+
+def test_pi_env_excludes_arbitrary_secret(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("MY_CUSTOM_SECRET", "shhh")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "MY_CUSTOM_SECRET" not in env
+
+
+def test_pi_env_passes_lc_glob(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
+    monkeypatch.setenv("LC_CTYPE", "en_US.UTF-8")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("LC_ALL") == "C.UTF-8"
+    assert env.get("LC_CTYPE") == "en_US.UTF-8"
+
+
+def test_pi_env_passes_language(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("LANGUAGE", "en_US")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("LANGUAGE") == "en_US"
+
+
+def test_pi_env_includes_llm_api_key(monkeypatch, tmp_path, _scrubbed_env):
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com")
+    monkeypatch.setenv("LLM_MODEL", "model-x")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("LLM_API_KEY") == "k"
+    assert env.get("LLM_BASE_URL") == "https://api.example.com"
+    assert env.get("LLM_MODEL") == "model-x"
+
+
+def test_pi_env_passthrough_passes_listed_keys(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    monkeypatch.setenv("FOO", "x")
+    monkeypatch.setenv("BAR", "y")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO,BAR")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("FOO") == "x"
+    assert env.get("BAR") == "y"
+
+
+def test_pi_env_passthrough_rejects_lowercase_keys(
+    monkeypatch, tmp_path, _scrubbed_env, caplog
+):
+    monkeypatch.setenv("foo", "x")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "foo")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    with caplog.at_level(logging.INFO):
+        env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "foo" not in env
+    # D3: skipped passthrough keys are logged at INFO level.
+    info_records = [r for r in caplog.records if r.levelno == logging.INFO]
+    assert any(
+        "pi_env_passthrough_skipped_invalid_key" in r.getMessage()
+        or "foo" in r.getMessage()
+        for r in info_records
+    )
+
+
+def test_pi_env_passthrough_skips_digit_leading(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    monkeypatch.setenv("1FOO", "x")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "1FOO")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "1FOO" not in env
+
+
+def test_pi_env_passthrough_skips_key_with_space(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO BAR")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "FOO BAR" not in env
+    assert "FOO" not in env
+    assert "BAR" not in env
+
+
+def test_pi_env_passthrough_skips_keys_not_set_on_parent(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    # MOMUS_PI_ENV_PASSTHROUGH lists FOO, but FOO is not set in parent env.
+    # No KeyError; FOO simply not added.
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert "FOO" not in env
+
+
+def test_pi_env_passthrough_does_not_override_momus_work_dir(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    monkeypatch.setenv("MOMUS_WORK_DIR", "/should/not/win")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_WORK_DIR")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    # Orchestrator's value wins; passthrough listing is reserved-skipped.
+    assert env["MOMUS_WORK_DIR"] == "w"
+
+
+def test_pi_env_passthrough_skips_reserved_toolcall_log(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    monkeypatch.setenv("MOMUS_TOOLCALL_LOG", "/tmp/tc.jsonl")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_TOOLCALL_LOG")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    # MOMUS_TOOLCALL_LOG is _RESERVED_PASSTHROUGH and must not be set via
+    # the passthrough mechanism (orchestrator/harness-only).
+    assert "MOMUS_TOOLCALL_LOG" not in env
+
+
+def test_pi_env_sets_momus_work_dir_relative(monkeypatch, tmp_path, _scrubbed_env):
+    work_dir = tmp_path / "nested" / "wd"
+    work_dir.mkdir(parents=True)
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env["MOMUS_WORK_DIR"] == str(Path("nested") / "wd")
+
+
+def test_pi_env_does_not_mutate_os_environ(
+    monkeypatch, tmp_path, _scrubbed_env
+):
+    snapshot = dict(os.environ)
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert dict(os.environ) == snapshot

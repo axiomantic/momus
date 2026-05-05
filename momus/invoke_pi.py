@@ -3,14 +3,56 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Callable
 
+log = logging.getLogger(__name__)
+
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
+
+# W3: Default-deny env allowlist for the pi subprocess.
+#
+# Per design §W3 (refresh 2026-05-05): replace the previous wholesale
+# `dict(os.environ)` passthrough with an explicit allowlist so that
+# GITHUB_TOKEN, ACTIONS_RUNTIME_TOKEN, and arbitrary user secrets are
+# unreachable from the LLM tool layer. Users with workflow-specific env
+# vars can extend the allowlist via MOMUS_PI_ENV_PASSTHROUGH (comma-
+# separated key names).
+PI_ENV_ALWAYS_ALLOW: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "LANG",
+        "LANGUAGE",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "LLM_API_KEY",
+    }
+)
+
+# Any LC_* key passes (locale categories: LC_ALL, LC_CTYPE, LC_MESSAGES, ...).
+PI_ENV_LC_PREFIX = "LC_"
+
+# Conservative key-shape regex: uppercase-only, digit-or-underscore tail. The
+# passthrough mechanism rejects anything that doesn't match — lowercase keys,
+# digit-leading keys, keys with spaces or punctuation.
+_PASSTHROUGH_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# Keys reserved for orchestrator/harness use; even if listed in
+# MOMUS_PI_ENV_PASSTHROUGH they are NOT forwarded (would otherwise let a
+# malicious caller clobber MOMUS_WORK_DIR or redirect the toolcall log).
+_RESERVED_PASSTHROUGH: frozenset[str] = frozenset(
+    {"MOMUS_WORK_DIR", "MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_TOOLCALL_LOG"}
+)
 
 PHASE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
     # Phase 1 needs no tools — input is a JSON file the model reads via the
@@ -401,18 +443,57 @@ def _build_pi_command(prompt: str, tools: list[str]) -> list[str]:
 
 
 def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
-    """Forward env to pi.
+    """Build the env handed to the pi subprocess (W3: default-deny).
 
-    Adds ``MOMUS_WORK_DIR``: the work_dir's path relative to repo_root.
-    The readonly-tools extension reads it to allow `write_output` paths
-    under ``<MOMUS_WORK_DIR>/outputs/`` (e.g. ``.momus/outputs/...``).
-    Pi runs with cwd=repo_root, so this is also the prefix the model
-    must use in tool args to reference inputs/outputs from CWD.
+    Returns a fresh dict containing only:
 
-    LLM_API_KEY is forwarded through; pi consumes it.
+    1. Keys in ``PI_ENV_ALWAYS_ALLOW`` that are set on the parent.
+    2. Any ``LC_*`` key (locale categories).
+    3. Keys named in ``$MOMUS_PI_ENV_PASSTHROUGH`` (comma-separated) that
+       (a) match the conservative shape ``^[A-Z][A-Z0-9_]*$`` and
+       (b) are NOT in ``PI_ENV_ALWAYS_ALLOW``, the LC_ glob, or
+       ``_RESERVED_PASSTHROUGH``. Skipped keys are logged at INFO (D3).
+    4. ``MOMUS_WORK_DIR`` set to ``work_dir.relative_to(repo_root)``,
+       written LAST so a passthrough listing it cannot clobber the
+       orchestrator's value.
+
+    ``GITHUB_TOKEN``, ``GH_TOKEN``, ``ACTIONS_RUNTIME_TOKEN``, arbitrary
+    user secrets, and any key not on the allowlist are absent from the
+    returned env. ``os.environ`` is not mutated.
+
+    LLM_API_KEY is forwarded; pi consumes it via the readonly-tools
+    extension's ``apiKey: "LLM_API_KEY"`` registration (the literal key
+    never appears in argv).
     """
-    env = dict(os.environ)
-    env["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
-    return env
+    parent = os.environ
+    out: dict[str, str] = {}
+
+    for k in PI_ENV_ALWAYS_ALLOW:
+        v = parent.get(k)
+        if v is not None:
+            out[k] = v
+
+    for k, v in parent.items():
+        if k.startswith(PI_ENV_LC_PREFIX):
+            out[k] = v
+
+    raw = parent.get("MOMUS_PI_ENV_PASSTHROUGH", "")
+    for token in (t.strip() for t in raw.split(",") if t.strip()):
+        if not _PASSTHROUGH_KEY_RE.match(token):
+            log.info("pi_env_passthrough_skipped_invalid_key key=%s", token)
+            continue
+        if (
+            token in PI_ENV_ALWAYS_ALLOW
+            or token.startswith(PI_ENV_LC_PREFIX)
+            or token in _RESERVED_PASSTHROUGH
+        ):
+            log.info("pi_env_passthrough_skipped_reserved key=%s", token)
+            continue
+        v = parent.get(token)
+        if v is not None:
+            out[token] = v
+
+    out["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
+    return out
 
 
