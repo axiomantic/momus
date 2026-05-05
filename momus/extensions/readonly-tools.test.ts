@@ -20,6 +20,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ensureWithinCwd,
+  executeFindRepo,
+  executeGrepRepo,
+  executeLsRepo,
   executeReadRepo,
   isDeepSeekViaOpenRouter,
   rewriteThinkingSignaturesForDeepSeek,
@@ -390,5 +393,243 @@ describe("ensureWithinCwd", () => {
     const r = ensureWithinCwd("", cwd);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("InvalidArgument");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Grep: grep_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("grep_repo", () => {
+  test("grep_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.txt"), "alpha\nbeta\ngamma\n");
+    writeFileSync(join(cwd, "b.txt"), "alpha-only\n");
+    const result = await executeGrepRepo(
+      { pattern: "alpha", path: "." },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    const matches = result.details.matches as Array<{
+      file: string;
+      line: number;
+      text: string;
+    }>;
+    expect(matches.length).toBe(2);
+    const files = matches.map((m) => m.file).sort();
+    expect(files).toEqual(["a.txt", "b.txt"]);
+  });
+
+  test("grep_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/etc" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "~/secrets" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "../escape" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-grep-"));
+    writeFileSync(join(outside, "x.txt"), "alpha\n");
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeGrepRepo(
+      { pattern: "alpha", path: "linkdir" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("grep_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/proc/self/environ" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/dev/null" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "no-such-dir" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Find: find_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("find_repo", () => {
+  test("find_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    mkdirSync(join(cwd, "sub"));
+    writeFileSync(join(cwd, "a.txt"), "");
+    writeFileSync(join(cwd, "sub", "b.txt"), "");
+    const result = await executeFindRepo({ path: ".", name: "*.txt" }, cwd);
+    expect(result.isError).toBeUndefined();
+    const results = (result.details.results as string[]).sort();
+    expect(results).toEqual(["a.txt", "sub/b.txt"]);
+  });
+
+  test("find_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/etc" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "~" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "../up" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-find-"));
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeFindRepo({ path: "linkdir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("find_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/proc/self/environ" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/dev" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "no-such-dir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Ls: ls_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("ls_repo", () => {
+  test("ls_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.txt"), "");
+    mkdirSync(join(cwd, "subdir"));
+    const result = await executeLsRepo({ path: "." }, cwd);
+    expect(result.isError).toBeUndefined();
+    const entries = (
+      result.details.entries as Array<{ name: string; type: string }>
+    ).sort((x, y) => x.name.localeCompare(y.name));
+    expect(entries).toEqual([
+      { name: "a.txt", type: "file" },
+      { name: "subdir", type: "directory" },
+    ]);
+  });
+
+  test("ls_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/etc" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "~/Library" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: ".." }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-ls-"));
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeLsRepo({ path: "linkdir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("ls_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/proc/self" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/dev" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "no-such-dir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
   });
 });

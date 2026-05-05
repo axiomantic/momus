@@ -23,11 +23,12 @@ import { spawn } from "node:child_process";
 import {
   existsSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   statSync,
 } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
@@ -104,19 +105,24 @@ export function ensureWithinCwd(
   if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
     return { ok: false, reason: "OutsideRepo" };
   }
-  // Parent-realpath: works whether or not the leaf exists.
-  const parent = dirname(resolved);
-  let realParent: string;
-  try {
-    realParent = realpathSync(parent);
-  } catch (e: any) {
-    if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
-    return { ok: false, reason: "InvalidArgument" };
-  }
-  if (!realParent.startsWith(cwd + sep) && realParent !== cwd) {
-    return { ok: false, reason: "Symlink" };
-  }
+  // Parent-realpath: skip when the resolved path IS the cwd (no parent
+  // inside the contained region to check). For all sub-paths, verify the
+  // parent dir resolves to a path inside cwd; this catches symlinks even
+  // when the leaf doesn't exist yet.
   let realFinal = resolved;
+  if (resolved !== cwd) {
+    const parent = dirname(resolved);
+    let realParent: string;
+    try {
+      realParent = realpathSync(parent);
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
+      return { ok: false, reason: "InvalidArgument" };
+    }
+    if (!realParent.startsWith(cwd + sep) && realParent !== cwd) {
+      return { ok: false, reason: "Symlink" };
+    }
+  }
   if (existsSync(resolved)) {
     try {
       realFinal = realpathSync(resolved);
@@ -174,6 +180,241 @@ export async function executeReadRepo(
   return {
     content: [{ type: "text", text: slice }],
     details: { lines_total: lines.length, resolved_path: check.resolved },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Grep / Find / Ls
+// ---------------------------------------------------------------------------
+
+const MAX_GREP_MATCHES = 1000;
+const MAX_FIND_RESULTS = 5000;
+
+export interface GrepRepoParams {
+  pattern: string;
+  path?: string;
+  glob?: string;
+  "-i"?: boolean;
+  "-n"?: boolean;
+}
+
+/**
+ * grep_repo execute body. Node-side recursive scan that applies
+ * `ensureWithinCwd` to every file before reading. We do NOT shell out to
+ * `rg` here — staying in-process keeps containment guarantees on every
+ * filesystem touch.
+ */
+export async function executeGrepRepo(
+  params: GrepRepoParams,
+  cwd: string,
+): Promise<any> {
+  if (typeof params.pattern !== "string" || params.pattern.length === 0) {
+    return toolError("InvalidArgument", "<pattern>");
+  }
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) return toolError(check.reason, root);
+  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  let re: RegExp;
+  try {
+    re = new RegExp(params.pattern, params["-i"] ? "i" : "");
+  } catch {
+    return toolError("InvalidArgument", "<pattern>");
+  }
+  const matches: Array<{ file: string; line: number; text: string }> = [];
+  let truncated = false;
+  const visit = (abs: string) => {
+    if (matches.length >= MAX_GREP_MATCHES) {
+      truncated = true;
+      return;
+    }
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      return;
+    }
+    if (st.isDirectory()) {
+      let entries: string[];
+      try {
+        entries = readdirSync(abs);
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = resolve(abs, e);
+        // Skip symlinks that escape cwd; do not let them tank the whole scan.
+        const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
+        if (!sub.ok) continue;
+        visit(child);
+        if (matches.length >= MAX_GREP_MATCHES) return;
+      }
+    } else if (st.isFile()) {
+      let content: string;
+      try {
+        if (st.size > MAX_READ_BYTES) return;
+        content = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (re.test(lines[i])) {
+          matches.push({
+            file: relative(cwd, abs) || basename(abs),
+            line: i + 1,
+            text: lines[i],
+          });
+          if (matches.length >= MAX_GREP_MATCHES) {
+            truncated = true;
+            return;
+          }
+        }
+      }
+    }
+  };
+  visit(check.resolved);
+  return {
+    content: [
+      {
+        type: "text",
+        text: matches
+          .slice(0, 200)
+          .map((m) => `${m.file}:${m.line}:${m.text}`)
+          .join("\n"),
+      },
+    ],
+    details: { matches, truncated, resolved_path: check.resolved },
+  };
+}
+
+export interface FindRepoParams {
+  path?: string;
+  name?: string;
+  type?: "file" | "directory" | "symlink";
+}
+
+/**
+ * find_repo execute body. Recursive readdir; every emitted path is
+ * containment-checked. No shell-out.
+ */
+export async function executeFindRepo(
+  params: FindRepoParams,
+  cwd: string,
+): Promise<any> {
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) return toolError(check.reason, root);
+  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  // Glob -> RegExp translation: `*` -> `[^/]*`, `?` -> `.`, escape rest.
+  const nameRe = params.name
+    ? new RegExp(
+        "^" +
+          params.name
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*/g, "[^/]*")
+            .replace(/\?/g, ".") +
+          "$",
+      )
+    : null;
+  const wantType = params.type;
+  const out: string[] = [];
+  let truncated = false;
+  const visit = (abs: string) => {
+    if (out.length >= MAX_FIND_RESULTS) {
+      truncated = true;
+      return;
+    }
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      return;
+    }
+    const matchesType =
+      !wantType ||
+      (wantType === "file" && st.isFile()) ||
+      (wantType === "directory" && st.isDirectory()) ||
+      (wantType === "symlink" && st.isSymbolicLink());
+    if (abs !== check.resolved) {
+      const baseName = basename(abs);
+      const matchesName = !nameRe || nameRe.test(baseName);
+      if (matchesType && matchesName) {
+        out.push(relative(cwd, abs));
+      }
+    }
+    if (st.isDirectory()) {
+      let entries: string[];
+      try {
+        entries = readdirSync(abs);
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = resolve(abs, e);
+        const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
+        if (!sub.ok) continue;
+        visit(child);
+        if (out.length >= MAX_FIND_RESULTS) return;
+      }
+    }
+  };
+  visit(check.resolved);
+  return {
+    content: [{ type: "text", text: out.slice(0, 500).join("\n") }],
+    details: { results: out, truncated, resolved_path: check.resolved },
+  };
+}
+
+export interface LsRepoParams {
+  path?: string;
+}
+
+/**
+ * ls_repo execute body. Single-level readdir; entries past containment.
+ */
+export async function executeLsRepo(
+  params: LsRepoParams,
+  cwd: string,
+): Promise<any> {
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) return toolError(check.reason, root);
+  if (!existsSync(check.resolved)) return toolError("NotFound", root);
+  const st = statSync(check.resolved);
+  if (!st.isDirectory()) {
+    return toolError("InvalidArgument", root);
+  }
+  let names: string[];
+  try {
+    names = readdirSync(check.resolved);
+  } catch {
+    return toolError("NotFound", root);
+  }
+  const entries: Array<{ name: string; type: string }> = [];
+  for (const n of names) {
+    const childAbs = resolve(check.resolved, n);
+    let cst;
+    try {
+      cst = statSync(childAbs);
+    } catch {
+      // Broken symlink etc. — skip rather than fail the whole listing.
+      continue;
+    }
+    let type = "other";
+    if (cst.isFile()) type = "file";
+    else if (cst.isDirectory()) type = "directory";
+    else if (cst.isSymbolicLink()) type = "symlink";
+    entries.push({ name: n, type });
+  }
+  return {
+    content: [
+      {
+        type: "text",
+        text: entries.map((e) => `${e.type}\t${e.name}`).join("\n"),
+      },
+    ],
+    details: { entries, resolved_path: check.resolved },
   };
 }
 
@@ -329,6 +570,66 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params) {
       return executeReadRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "grep_repo",
+    label: "grep (repo-cwd contained)",
+    description:
+      "Search for a regex pattern under the repo cwd. Absolute and ~/ " +
+      "paths are rejected; symlinks escaping cwd are skipped silently. " +
+      "Returns up to 1000 matches.",
+    parameters: Type.Object({
+      pattern: Type.String({ description: "Regular expression." }),
+      path: Type.Optional(
+        Type.String({ description: "Relative path under cwd." }),
+      ),
+      glob: Type.Optional(Type.String()),
+      "-i": Type.Optional(Type.Boolean()),
+      "-n": Type.Optional(Type.Boolean()),
+    }),
+    async execute(_id, params) {
+      return executeGrepRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "find_repo",
+    label: "find (repo-cwd contained)",
+    description:
+      "Find files/directories by name under the repo cwd. Absolute and " +
+      "~/ paths are rejected; symlinks escaping cwd are skipped silently. " +
+      "Returns up to 5000 results.",
+    parameters: Type.Object({
+      path: Type.Optional(Type.String()),
+      name: Type.Optional(
+        Type.String({ description: "Glob pattern, e.g. '*.py'." }),
+      ),
+      type: Type.Optional(
+        Type.Union([
+          Type.Literal("file"),
+          Type.Literal("directory"),
+          Type.Literal("symlink"),
+        ]),
+      ),
+    }),
+    async execute(_id, params) {
+      return executeFindRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "ls_repo",
+    label: "ls (repo-cwd contained)",
+    description:
+      "List a single directory under the repo cwd. Absolute and ~/ paths " +
+      "are rejected; broken symlinks are skipped.",
+    parameters: Type.Object({
+      path: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params) {
+      return executeLsRepo(params, process.cwd());
     },
   });
 
