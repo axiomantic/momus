@@ -1,0 +1,44 @@
+name: redteam-corpus
+
+# Weekly adversarial-corpus run: dispatches the W1 corpus fixtures
+# under tests/adversarial/cases/ against the configured LLM provider
+# and uploads the per-run summary as a workflow artifact.
+#
+# - schedule: Monday 06:00 UTC.
+# - workflow_dispatch: manual trigger via `gh workflow run redteam-corpus.yml`.
+#
+# Per-PR runs are intentionally NOT enabled: cost is bounded only by
+# the upstream provider's per-key budget. Manual or weekly is the
+# right cadence per the W1 design.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+jobs:
+  run-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      MOMUS_REDTEAM_N_RUNS: "5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Installs the pinned pi-coding-agent from package-lock.json (W2-Pin).
+      - run: npm ci
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      - name: Run adversarial corpus
+        run: uv run pytest -m adversarial --tb=short
+      - name: Upload last-run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: last-run-json
+          path: tests/adversarial/.last-run.json
