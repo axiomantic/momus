@@ -42,19 +42,17 @@ def publish(
     inline_comments = build_inline_comments(findings_doc.get("findings", []), run_url, run_id)
     event = findings_doc.get("verdict", "COMMENT")
 
-    # GitHub rejects APPROVE in three cases: (1) self-approval (token user ==
-    # PR author), (2) Bot-typed tokens, (3) installation tokens lacking a
-    # user identity (the default GITHUB_TOKEN inside Actions). Detect all
-    # three and downgrade to COMMENT, annotating the body so a human reader
-    # sees what happened.
+    # Pre-emptive downgrade for cases we can decide from the token's user
+    # info alone: self-approval (token user == PR author) and Bot-typed
+    # tokens. The third case — the default Actions ``GITHUB_TOKEN``, an
+    # installation token indistinguishable from a custom App's token at
+    # this layer — falls through and is detected at submit time via
+    # GitHub's 422 ("Apps cannot approve...").
     if event == "APPROVE":
         reason = _approve_downgrade_reason(pr_meta.get("author"))
         if reason is not None:
             event = "COMMENT"
-            body = (
-                f"_Note: verdict was APPROVE but downgraded to COMMENT "
-                f"because {reason}._\n\n"
-            ) + body
+            body = _prepend_downgrade_note(body, reason)
 
     _submit_review(
         owner=owner,
@@ -248,6 +246,7 @@ def _submit_review(
     inline_comments: list[dict[str, Any]],
     event: str,
 ) -> None:
+    endpoint = f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
     payload = {
         "commit_id": head_sha,
         "body": body,
@@ -255,20 +254,31 @@ def _submit_review(
         "comments": inline_comments,
     }
     try:
-        _gh_api(
-            "POST",
-            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-            payload,
-        )
+        _gh_api("POST", endpoint, payload)
         return
     except _GhApiError as exc:
-        if exc.status != 422 or not inline_comments:
+        if exc.status != 422:
             raise
-        # Self-approval 422 must NOT be retried as body-only — the body-only
-        # request still carries event=APPROVE and would hit the same 422.
-        # Belt-and-suspenders: publish() already downgrades, but if we land
-        # here for any reason, surface the error instead of looping.
+        # 422 on event=APPROVE most commonly means the token is the default
+        # Actions ``GITHUB_TOKEN`` (an installation token with no approval
+        # rights). The pre-emptive check in publish() can't distinguish
+        # this from a real App token, so we fall back here: prepend the
+        # downgrade note and retry as COMMENT. Resubmits keep inline
+        # comments — they were valid; only the verdict was rejected.
+        if event == "APPROVE" and _is_app_cannot_approve_error(str(exc)):
+            downgrade_payload = {
+                "commit_id": head_sha,
+                "body": _prepend_downgrade_note(body, _APP_CANNOT_APPROVE_REASON),
+                "event": "COMMENT",
+                "comments": inline_comments,
+            }
+            _gh_api("POST", endpoint, downgrade_payload)
+            return
+        # Self-approval 422 must NOT be retried — the retry would carry
+        # the same event and hit the same 422.
         if _is_self_approval_error(str(exc)):
+            raise
+        if not inline_comments:
             raise
         # Otherwise: 422 typically means at least one comment cited a line
         # not on a diff hunk. Strip inline comments and retry body-only.
@@ -279,11 +289,7 @@ def _submit_review(
             "event": event,
             "comments": [],
         }
-        _gh_api(
-            "POST",
-            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-            retry_payload,
-        )
+        _gh_api("POST", endpoint, retry_payload)
 
 
 def _post_thread_replies(
@@ -368,60 +374,34 @@ def _get_token_user_info() -> dict[str, Any] | None:
         return None
 
 
-def _get_token_app_slug() -> str | None:
-    """Return the slug of the GitHub App that owns the current token.
+_APP_CANNOT_APPROVE_REASON = (
+    "the default GITHUB_TOKEN cannot approve PRs "
+    "(configure a GitHub App; see SETUP.md)"
+)
 
-    `GET /app` works for any installation token and returns the owning
-    App's metadata. The default Actions ``GITHUB_TOKEN`` is itself an
-    installation token for the ``github-actions`` App, so it returns
-    that slug. A custom-App installation token returns the custom App's
-    slug. Personal access tokens / OAuth tokens 4xx — caller treats
-    None as "not an App token".
-    """
-    try:
-        proc = subprocess.run(
-            ["gh", "api", "/app"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return None
-    slug = data.get("slug")
-    return slug if isinstance(slug, str) and slug else None
+
+def _prepend_downgrade_note(body: str, reason: str) -> str:
+    return (
+        f"_Note: verdict was APPROVE but downgraded to COMMENT because {reason}._\n\n"
+    ) + body
 
 
 def _approve_downgrade_reason(pr_author: str | None) -> str | None:
-    """Return a one-line reason if APPROVE should be downgraded; else None."""
+    """Return a one-line reason if APPROVE should be pre-emptively downgraded.
+
+    Pre-emptive cases (decidable from the token's user info alone):
+    - ``Bot``-typed tokens cannot approve.
+    - The token user matching the PR author would self-approve.
+
+    The opaque case — installation tokens, where ``gh api /user`` 4xxs and
+    ``gh api /app`` requires a JWT we do not have — is not decided here.
+    Those go to GitHub as ``APPROVE``; if it is the default Actions
+    ``GITHUB_TOKEN``, GitHub returns a 422 and ``_submit_review`` retries
+    as ``COMMENT`` with the App-cannot-approve note prepended. A custom
+    App with approval rights succeeds on the first attempt.
+    """
     info = _get_token_user_info()
     if info is None:
-        # `gh api /user` 4xxs for any installation token — both the default
-        # GITHUB_TOKEN (which GitHub *will* reject for APPROVE) and a custom
-        # GitHub App installation token (which is allowed to APPROVE). They
-        # differ in which App owns the token: the default belongs to the
-        # ``github-actions`` App, customs to whatever App the workflow
-        # provisioned. ``GET /app`` returns the owning App for either, so
-        # use that to tell them apart instead of relying on a workflow flag.
-        slug = _get_token_app_slug()
-        if slug == "github-actions":
-            return "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
-        if slug is not None:
-            # A non-Actions App slug means the workflow minted an App token
-            # whose installation has approval rights. Allow.
-            return None
-        # ``GET /app`` failed too. Fall back to the legacy explicit flag,
-        # then default-deny if nothing tells us otherwise — same posture
-        # we shipped before App-slug detection landed.
-        if os.environ.get("MOMUS_USING_APP_TOKEN") == "true":
-            return None
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            return "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
         return None
     login = info.get("login", "")
     user_type = info.get("type", "")
@@ -430,6 +410,25 @@ def _approve_downgrade_reason(pr_author: str | None) -> str | None:
     if isinstance(pr_author, str) and login.lower() == pr_author.lower():
         return "the bot account is the PR author"
     return None
+
+
+def _is_app_cannot_approve_error(message: str) -> bool:
+    """Detect the 422 GitHub returns when an App installation token (most
+    notably the default Actions ``GITHUB_TOKEN``) tries to APPROVE.
+
+    GitHub's wording has historically included phrases like "GitHub Apps
+    cannot approve their own pull request" and "must use one of the events
+    `COMMENT` or `REQUEST_CHANGES`". Match liberally to absorb future
+    rephrasing without needing a release.
+    """
+    lower = message.lower()
+    if "must use one of the events" in lower:
+        return True
+    if "cannot approve" in lower and (
+        "github app" in lower or "apps" in lower or "installation" in lower
+    ):
+        return True
+    return False
 
 
 def _is_self_approval_error(message: str) -> bool:
