@@ -494,3 +494,31 @@ def test_render_phase_prompt_called_with_work_dir_for_phase1(
     assert by_phase["phase3"]["work_dir"] is None
     assert by_phase["phase1"]["work_dir_rel"] == work_dir_rel
     assert by_phase["phase1"]["run_id"] == "A"
+
+
+# ---------------------------------------------------------------------------
+# W2-AllowlistSwap: Phase tool allowlists use *_repo variants.
+# ---------------------------------------------------------------------------
+
+
+def test_phase_allowlists_use_repo_suffixed_tools():
+    from momus.invoke_pi import PHASE_TOOL_ALLOWLISTS
+
+    assert PHASE_TOOL_ALLOWLISTS["phase1"] == ["write_output"]
+    for ph in ("phase2", "phase3"):
+        assert PHASE_TOOL_ALLOWLISTS[ph] == [
+            "read_repo",
+            "grep_repo",
+            "find_repo",
+            "ls_repo",
+            "bash_ro",
+            "write_output",
+        ]
+
+
+def test_phase_allowlists_omit_pi_builtins():
+    from momus.invoke_pi import PHASE_TOOL_ALLOWLISTS
+
+    for ph in ("phase2", "phase3"):
+        for forbidden in ("read", "grep", "find", "ls", "edit", "write", "bash"):
+            assert forbidden not in PHASE_TOOL_ALLOWLISTS[ph]

@@ -17,9 +17,31 @@ PHASE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
     # prompt, output via write_output. Keep tools minimal.
     "phase1": ["write_output"],
     # Phase 2 needs the full read-only investigation toolkit.
-    "phase2": ["read", "grep", "find", "ls", "bash_ro", "write_output"],
+    #
+    # W2 substitution: the *_repo tools are cwd-contained replacements for
+    # pi's filesystem-wide built-ins (read/grep/find/ls). The built-ins
+    # remain registered inside pi but are not reachable from these phases
+    # because they're absent from --tools. read_repo / grep_repo /
+    # find_repo / ls_repo are registered by momus/extensions/readonly-
+    # tools.ts and reject absolute / ~/ / ../-traversal paths plus
+    # symlinks that escape cwd.
+    "phase2": [
+        "read_repo",
+        "grep_repo",
+        "find_repo",
+        "ls_repo",
+        "bash_ro",
+        "write_output",
+    ],
     # Phase 3 needs the same as phase 2 (audit by reading code at citations).
-    "phase3": ["read", "grep", "find", "ls", "bash_ro", "write_output"],
+    "phase3": [
+        "read_repo",
+        "grep_repo",
+        "find_repo",
+        "ls_repo",
+        "bash_ro",
+        "write_output",
+    ],
 }
 
 # The "load-bearing" output each phase MUST produce. Phase 3 also writes
