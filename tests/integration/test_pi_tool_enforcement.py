@@ -69,10 +69,6 @@ def test_pi_rejects_disallowed_tool(tmp_path: Path):
         timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    events = [
-        json.loads(ln)
-        for ln in result.stdout.splitlines()
-        if ln.strip().startswith("{")
-    ]
+    events = [json.loads(ln) for ln in result.stdout.splitlines() if ln.strip().startswith("{")]
     tool_names = {e.get("tool") for e in events if e.get("tool")}
     assert "edit" not in tool_names

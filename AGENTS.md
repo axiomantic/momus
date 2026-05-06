@@ -72,6 +72,79 @@ plus a smoke fixture. Each fixture is pure data: `diff.patch`,
 - No AI-attribution footers in commits or PR descriptions.
 - Atomic commits: one task per commit per the implementation plan.
 
+## Testing conventions: pytest-tripwire
+
+`pytest-tripwire` (dev dep, version pinned in `pyproject.toml`) is the
+preferred mocking layer for tests that verify GitHub API payloads,
+subprocess invocations, or any other call where **call ordering, exact
+argument shape, and number-of-calls all matter for correctness**. Plain
+`unittest.mock.patch` / `pytest`'s `monkeypatch` capture a function and
+let the test grep through a list of calls afterward. Tripwire enforces
+the timeline strictly: every queued return / raise must fire, every
+fired interaction must be asserted, and the assertions must match in
+order. Examples already in tree: `tests/test_status.py`,
+`tests/test_invoke_pi.py`, `tests/test_publish.py`,
+`tests/test_publish_validation.py`,
+`tests/test_publish_retry_redaction.py`.
+
+**When to reach for tripwire**
+
+- A code path posts to a remote API (GitHub, gh CLI) and the test wants
+  to pin the exact endpoint + JSON body shape.
+- A code path retries on a specific error (e.g. publish.py's 422
+  branches) and the test wants to verify the retry payload, not just
+  the final state.
+- A code path is supposed to call a helper exactly N times in a
+  specific order (e.g. invoke_pi's first-call vs retry).
+- The current test relies on a captured-list-and-grep pattern that
+  would silently pass if the SUT started calling the mock with a
+  different shape.
+
+**When NOT to reach for tripwire**
+
+- The test does not mock anything (pure unit test on a data
+  transformation: see `tests/test_progress.py`,
+  `tests/test_preflight.py`).
+- The test only patches a fixture and never asserts on calls
+  (e.g. `monkeypatch.setenv`).
+- The test patches at module scope where tripwire's `with tripwire:`
+  context would create scoping noise.
+
+**Canonical pattern**
+
+```python
+import tripwire
+from momus import publish as publish_mod
+
+def test_publish_posts_review_once():
+    # `doc`, `pr_meta`, `cfg`, and `expected_payload` are assumed to be
+    # fixtures or locals defined elsewhere in the test module — this
+    # snippet shows only the tripwire-relevant scaffolding.
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})  # one queued return per expected call
+
+    with tripwire:
+        publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
+
+    gh_api.assert_call(
+        args=("POST", "/repos/owner/repo/pulls/25/reviews", expected_payload),
+        kwargs={},
+    )
+```
+
+For sequenced behavior, chain `.raises(err).returns({})` to queue an
+exception then a success; assert each in order with two `assert_call`
+calls. Use `dirty_equals` matchers (`IsInstance`, `IsDict(...,
+partial=True)`, `IsStr(regex=...)`) inside `assert_call` when the exact
+value is unstable but the shape matters. `assert_call` accepts a
+`raised=` kwarg to match calls that propagated an exception.
+
+**Upstream:**
+[pytest-tripwire on PyPI](https://pypi.org/project/pytest-tripwire/).
+The installed package's top-level `tripwire` module is the source of
+truth: `uv run python -c "import tripwire; help(tripwire)"` and
+`help(tripwire.mock)` print the canonical API.
+
 ## Common gotchas
 
 - Pi's `--tools` allowlist excludes `read`, `grep`, `find`, `ls` in

@@ -9,9 +9,9 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ def summarize_usage(events: Iterable[dict]) -> PhaseUsage:
         cached_tokens=cached_t,
         model=model,
     )
+
 
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
 
@@ -228,7 +229,7 @@ def invoke_pi_phase(
             if on_tool_complete and event.get("type") == "tool_execution_end":
                 try:
                     on_tool_complete()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     print(
                         f"[momus.pi {phase}] progress callback error: {exc}",
                         file=sys.stderr,
@@ -265,9 +266,7 @@ def invoke_pi_phase(
     # masquerading as an empty turn.
     err_msg = _find_provider_error(events)
     if err_msg is not None:
-        raise PiInvocationError(
-            f"phase {phase} failed: provider error: {err_msg}"
-        )
+        raise PiInvocationError(f"phase {phase} failed: provider error: {err_msg}")
     return events
 
 
@@ -364,12 +363,21 @@ def _log_event(phase: str, event: dict, raw: str) -> None:
         # Partial results — skip; tool_execution_end carries the full thing.
         return
 
-    if et in ("session", "agent_start", "agent_end", "turn_start", "turn_end",
-              "compaction_start", "compaction_end", "queue_update"):
-        bits: list[str] = []
-        for k in ("reason", "model", "messageCount"):
-            if k in event and event[k] not in (None, ""):
-                bits.append(f"{k}={event[k]}")
+    if et in (
+        "session",
+        "agent_start",
+        "agent_end",
+        "turn_start",
+        "turn_end",
+        "compaction_start",
+        "compaction_end",
+        "queue_update",
+    ):
+        bits: list[str] = [
+            f"{k}={event[k]}"
+            for k in ("reason", "model", "messageCount")
+            if k in event and event[k] not in (None, "")
+        ]
         suffix = (" " + " ".join(bits)) if bits else ""
         print(f"[momus.pi {phase}] {et}{suffix}", file=sys.stderr, flush=True)
         return
@@ -431,9 +439,7 @@ def invoke_pi_phase_with_retry(
     calling ``write_output``), retry once with a hard reminder appended to
     the prompt. Phases not in ``PHASE_EXPECTED_OUTPUTS`` skip the guard.
     """
-    events = invoke_pi_phase(
-        phase, work_dir, repo_root, on_tool_complete=on_tool_complete
-    )
+    events = invoke_pi_phase(phase, work_dir, repo_root, on_tool_complete=on_tool_complete)
     expected_rel = PHASE_EXPECTED_OUTPUTS.get(phase)
     if expected_rel is None:
         return events
@@ -468,8 +474,7 @@ def invoke_pi_phase_with_retry(
     events = events + retry_events
     if not expected_path.exists():
         raise PiInvocationError(
-            f"phase {phase} did not produce expected output {expected_rel} "
-            "after retry"
+            f"phase {phase} did not produce expected output {expected_rel} after retry"
         )
     return events
 
@@ -538,9 +543,7 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
         if v is not None:
             out[k] = v
 
-    for k, v in parent.items():
-        if k.startswith(PI_ENV_LC_PREFIX):
-            out[k] = v
+    out.update({k: v for k, v in parent.items() if k.startswith(PI_ENV_LC_PREFIX)})
 
     raw = parent.get("MOMUS_PI_ENV_PASSTHROUGH", "")
     for token in (t.strip() for t in raw.split(",") if t.strip()):
@@ -560,5 +563,3 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
 
     out["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
     return out
-
-

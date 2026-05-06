@@ -57,9 +57,7 @@ def post_check_run(
         verdict = findings_doc.get("verdict", "COMMENT")
         findings = findings_doc.get("findings") or []
         blocking_set = set(blocking_severities or [])
-        blocking_findings = [
-            f for f in findings if f.get("severity") in blocking_set
-        ]
+        blocking_findings = [f for f in findings if f.get("severity") in blocking_set]
         conclusion = _verdict_to_conclusion(verdict, blocking_findings)
         title = _build_title(verdict, len(findings), len(blocking_findings))
         summary = _build_summary(findings_doc, blocking_findings)
@@ -79,7 +77,7 @@ def post_check_run(
             f"/repos/{owner}/{repo}/check-runs",
             payload,
         )
-    except Exception as exc:  # noqa: BLE001 — best-effort by design
+    except Exception as exc:
         print(f"[momus.checks] post failed: {exc}", file=sys.stderr, flush=True)
 
 
@@ -134,8 +132,7 @@ def _build_summary(
     if blocking_findings:
         parts.append("")
         parts.append("**Blocking findings:**")
-        for f in blocking_findings:
-            parts.append(_finding_one_liner(f))
+        parts.extend(_finding_one_liner(f) for f in blocking_findings)
 
     return "\n".join(parts) or "(no summary)"
 

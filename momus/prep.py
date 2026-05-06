@@ -48,9 +48,7 @@ def prep_inputs(
         # the prompt uses <<UNTRUSTED_PRIOR_THREADS_JSON>>. Other phases
         # do not reference that placeholder and pass None (the default).
         phase_work_dir = work_dir if phase == "phase1" else None
-        rendered = render_phase_prompt(
-            phase, config, run_id, work_dir_rel, work_dir=phase_work_dir
-        )
+        rendered = render_phase_prompt(phase, config, run_id, work_dir_rel, work_dir=phase_work_dir)
         (prompts_dir / f"{phase}.md").write_text(rendered)
 
     return inputs_dir
@@ -87,7 +85,11 @@ def _write_conventions(repo_root: Path, config: Config, dest: Path) -> None:
         if not _is_under(path, repo_root) or not path.exists() or path in seen:
             continue
         seen.add(path)
-        parts.append(_format_convention_section(path.relative_to(repo_root), path.read_text(encoding="utf-8")))
+        parts.append(
+            _format_convention_section(
+                path.relative_to(repo_root), path.read_text(encoding="utf-8")
+            )
+        )
 
     for pattern in config.conventions.globs:
         for match in sorted(repo_root.glob(pattern)):
@@ -95,7 +97,11 @@ def _write_conventions(repo_root: Path, config: Config, dest: Path) -> None:
             if not _is_under(path, repo_root) or not path.is_file() or path in seen:
                 continue
             seen.add(path)
-            parts.append(_format_convention_section(path.relative_to(repo_root), path.read_text(encoding="utf-8")))
+            parts.append(
+                _format_convention_section(
+                    path.relative_to(repo_root), path.read_text(encoding="utf-8")
+                )
+            )
 
     dest.write_text("\n".join(parts) if parts else "")
 

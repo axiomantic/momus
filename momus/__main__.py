@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .checks import post_check_run
-from .config import Config, load_config
+from .config import load_config
 from .fetch_priors import fetch_prior_threads
 from .findings_schema import FindingsDoc
 from .hunks import parse_unified_diff
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     post_status(state="starting", detail="setting up", **status_kwargs)
     try:
         return _run(args, run_url, status_kwargs)
-    except Exception as exc:  # noqa: BLE001 — surface ANY failure to the PR
+    except Exception as exc:
         # Truncate so the comment doesn't blow out with a megabyte traceback.
         msg = str(exc).splitlines()[0] if str(exc).strip() else type(exc).__name__
         if len(msg) > 240:
@@ -66,12 +66,12 @@ def _run(
     # path-resolution split that this entrypoint was rewritten to fix.
     try:
         work_dir_rel = work_dir.relative_to(repo_root)
-    except ValueError:
+    except ValueError as exc:
         raise SystemExit(
             f"--work-dir ({work_dir}) must be inside --repo-root "
             f"({repo_root}); pi runs from repo_root and references "
             "inputs/outputs via a relative path."
-        )
+        ) from exc
 
     config = load_config(repo_root)
 
@@ -94,9 +94,7 @@ def _run(
     pr_meta["run_id"] = _compute_run_id(prior_threads, config.review.run_id_scheme)
 
     inputs_dir = prep_inputs(repo_root, work_dir, work_dir_rel, pr_meta, config)
-    (inputs_dir / "prior-threads.json").write_text(
-        json.dumps(prior_threads, indent=2)
-    )
+    (inputs_dir / "prior-threads.json").write_text(json.dumps(prior_threads, indent=2))
 
     # Parse the diff so preflight can drop findings whose line citations
     # are not on a hunk (GitHub rejects such inline comments with 422).
@@ -146,15 +144,19 @@ def _run(
         _log(f"Phase 1: classifying {len(prior_threads)} prior threads")
         tracker.start("phase1")
         phase1_detail = (
-            f"phase 1/{len(phases_to_run)} — classifying "
-            f"{len(prior_threads)} prior threads"
+            f"phase 1/{len(phases_to_run)} — classifying {len(prior_threads)} prior threads"
         )
         _post_progress(phase1_detail, force=True)
+
+        def _on_phase1_tool_complete() -> None:
+            tracker.tick()
+            _post_progress(phase1_detail)
+
         events = invoke_pi_phase_with_retry(
             "phase1",
             work_dir,
             repo_root,
-            on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
+            on_tool_complete=_on_phase1_tool_complete,
         )
         phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
@@ -169,11 +171,16 @@ def _run(
     phase2_detail = f"phase {phase2_index}/{len(phases_to_run)} — reviewing diff"
     tracker.start("phase2")
     _post_progress(phase2_detail, force=True)
+
+    def _on_phase2_tool_complete() -> None:
+        tracker.tick()
+        _post_progress(phase2_detail)
+
     events = invoke_pi_phase_with_retry(
         "phase2",
         work_dir,
         repo_root,
-        on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
+        on_tool_complete=_on_phase2_tool_complete,
     )
     phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
@@ -189,23 +196,24 @@ def _run(
         hunk_lines=hunk_lines,
     )
     (outputs_dir / "findings.json").write_text(json.dumps(findings_doc, indent=2))
-    (outputs_dir / "preflight-log.json").write_text(
-        json.dumps(preflight_actions, indent=2)
-    )
+    (outputs_dir / "preflight-log.json").write_text(json.dumps(preflight_actions, indent=2))
 
     # Phase 3 — verify (optional)
     if config.verify.enabled:
         _log("Phase 3: verify gate")
-        phase3_detail = (
-            f"phase {len(phases_to_run)}/{len(phases_to_run)} — verifying findings"
-        )
+        phase3_detail = f"phase {len(phases_to_run)}/{len(phases_to_run)} — verifying findings"
         tracker.start("phase3")
         _post_progress(phase3_detail, force=True)
+
+        def _on_phase3_tool_complete() -> None:
+            tracker.tick()
+            _post_progress(phase3_detail)
+
         events = invoke_pi_phase_with_retry(
             "phase3",
             work_dir,
             repo_root,
-            on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
+            on_tool_complete=_on_phase3_tool_complete,
         )
         phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")
@@ -328,7 +336,7 @@ def _compute_run_id(prior_threads: list[dict[str, Any]], scheme: str) -> str:
 def _decode_run_index(finding_id: str, scheme: str) -> int | None:
     if not finding_id.startswith("BOT-"):
         return None
-    rest = finding_id[len("BOT-"):]
+    rest = finding_id[len("BOT-") :]
     if scheme == "alpha":
         # BOT-A1 -> A
         prefix = "".join(c for c in rest if c in string.ascii_uppercase)
@@ -397,7 +405,7 @@ def _read_findings_doc(path: Path) -> FindingsDoc:
         print(message, file=sys.stderr)
         # First line of the message is what main()'s handler surfaces to
         # the PR, keeping detail in the action log only.
-        raise FindingsValidationError(lines[0])
+        raise FindingsValidationError(lines[0]) from exc
 
 
 def _guess_run_url() -> str:

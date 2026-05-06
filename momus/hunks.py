@@ -70,10 +70,7 @@ def parse_unified_diff(patch_text: str) -> dict[str, set[int]]:
         if raw.startswith("\\"):
             continue
 
-        if raw.startswith("+"):
-            result[cur_path].add(right_line)
-            right_line += 1
-        elif raw.startswith(" "):
+        if raw.startswith(("+", " ")):
             result[cur_path].add(right_line)
             right_line += 1
         elif raw.startswith("-"):

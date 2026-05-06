@@ -1,0 +1,83 @@
+name: Docs
+
+# Versioned mkdocs publishing via `mike`.
+#
+# - Pushes to `main` that touch docs sources publish to the floating
+#   `dev` alias.
+# - Tag pushes matching `v*.*.*` (created by release.yml) publish to the
+#   immutable `vX.Y.Z` version, update the major-version `vX` floating
+#   alias, and point `latest` at the new release.
+#
+# Site is served from the `gh-pages` branch. Repo Settings -> Pages must
+# be set to "Deploy from branch", branch `gh-pages`, folder `/`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "momus/**"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install docs deps
+        # mkdocstrings[python] imports the project to extract docstrings,
+        # so the project itself must be installed alongside the docs
+        # group.
+        run: uv sync --group docs
+
+      - name: Configure git for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Strict build sanity check
+        run: uv run mkdocs build --strict
+
+      - name: Publish dev (main push)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        run: uv run mike deploy --push --update-aliases dev
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # TAG looks like vX.Y.Z; derive the floating major alias vX.
+          VERSION="${TAG}"
+          MAJOR="$(echo "$TAG" | cut -d. -f1)"
+
+          # Publish immutable version + update floating major alias and
+          # `latest`. `mike` rebases gh-pages between deploys, so this is
+          # safe to run sequentially.
+          uv run mike deploy --push --update-aliases "$VERSION" "$MAJOR" latest
+          uv run mike set-default --push latest

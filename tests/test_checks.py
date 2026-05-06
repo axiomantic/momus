@@ -6,7 +6,6 @@ import json
 import subprocess
 
 import tripwire
-
 from momus import checks as checks_mod
 from momus.checks import (
     _build_summary,
@@ -15,7 +14,6 @@ from momus.checks import (
     post_check_run,
 )
 from momus.config import ChecksConfig
-
 
 # --- conclusion mapping ------------------------------------------------------
 
@@ -99,9 +97,7 @@ def test_summary_falls_back_when_empty() -> None:
 
 
 def _gh_proc(stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(
-        args=["gh"], returncode=returncode, stdout=stdout, stderr=""
-    )
+    return subprocess.CompletedProcess(args=["gh"], returncode=returncode, stdout=stdout, stderr="")
 
 
 def _captured_run_factory():
@@ -192,9 +188,7 @@ def test_post_check_run_swallows_failures() -> None:
 
     def side_effect(*args, **kwargs):
         captured.append((args, kwargs))
-        return subprocess.CompletedProcess(
-            args=args, returncode=1, stdout="", stderr="HTTP 403"
-        )
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="HTTP 403")
 
     run_mock = tripwire.mock.object(checks_mod.subprocess, "run")
     run_mock.calls(side_effect)

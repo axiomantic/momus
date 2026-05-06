@@ -5,6 +5,7 @@ load-bearing for the security claims of the W4 hardening work. They
 are intentionally narrow: full prose review lives in code review, not
 in pytest.
 """
+
 from __future__ import annotations
 
 import re
@@ -39,7 +40,10 @@ def test_readme_no_longer_lists_gh_in_bash_ro_allowlist():
     )
     for m in matches:
         listing = m.group(1)
-        assert "`gh`" not in listing and " gh " not in listing, (
+        assert "`gh`" not in listing, (
+            f"bash_ro allowlist enumeration still includes gh:\n  {listing}"
+        )
+        assert " gh " not in listing, (
             f"bash_ro allowlist enumeration still includes gh:\n  {listing}"
         )
 
@@ -72,8 +76,7 @@ def test_readme_documents_pi_env_passthrough_escape_hatch():
     )
     # Must explain the syntax (comma-separated names) so users can act on it.
     assert "NAME1,NAME2" in section or "comma-separated" in section.lower(), (
-        "Environment scoping section must explain the value format "
-        "(comma-separated list of names)"
+        "Environment scoping section must explain the value format (comma-separated list of names)"
     )
     # Must call out that it is an opt-in escape hatch, not a flag to flip casually.
     assert "escape hatch" in section.lower() or "opt-in" in section.lower(), (
@@ -99,8 +102,7 @@ def test_changelog_has_v1_1_0_entry_with_hardening_bullets():
     )
     match = section_pattern.search(text + "\n## [END]\n")
     assert match is not None, (
-        "CHANGELOG must have a `## [1.1.0]` section header followed by "
-        "a later `## [` section."
+        "CHANGELOG must have a `## [1.1.0]` section header followed by a later `## [` section."
     )
     section = match.group(1)
     expected_topics = {
@@ -111,8 +113,7 @@ def test_changelog_has_v1_1_0_entry_with_hardening_bullets():
     }
     for topic, area in expected_topics.items():
         assert topic in section, (
-            f"v1.1.0 section is missing reference to {area} "
-            f"(string '{topic}' not found)."
+            f"v1.1.0 section is missing reference to {area} (string '{topic}' not found)."
         )
     # Section must be substantive, not a one-line stub.
     assert section.count("\n") >= 10, (
@@ -135,9 +136,7 @@ def test_agents_md_has_adversarial_corpus_section():
         flags=re.S | re.M,
     )
     match = section_pattern.search(text + "\n## END\n")
-    assert match is not None, (
-        "AGENTS.md must have an `## Adversarial corpus` section header."
-    )
+    assert match is not None, "AGENTS.md must have an `## Adversarial corpus` section header."
     section = match.group(0)
     required_in_section = [
         "redteam-corpus.yml",
@@ -145,6 +144,4 @@ def test_agents_md_has_adversarial_corpus_section():
         "MOMUS_REDTEAM_MOCK_PI",
     ]
     for needle in required_in_section:
-        assert needle in section, (
-            f"Adversarial corpus section is missing `{needle}`."
-        )
+        assert needle in section, f"Adversarial corpus section is missing `{needle}`."

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # types-PyYAML stubs not in dev deps
 
 DEFAULTS_PATH = Path(__file__).resolve().parent / "config-defaults.yaml"
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "low", "nit"}
@@ -125,7 +125,9 @@ def _to_config(data: dict[str, Any]) -> Config:
 
     scheme = review.get("run_id_scheme")
     if scheme not in ALLOWED_RUN_ID_SCHEMES:
-        raise ValueError(f"review.run_id_scheme: must be one of {ALLOWED_RUN_ID_SCHEMES}, got {scheme!r}")
+        raise ValueError(
+            f"review.run_id_scheme: must be one of {ALLOWED_RUN_ID_SCHEMES}, got {scheme!r}"
+        )
 
     policy = post.get("first_review_approve_policy")
     if policy not in ALLOWED_FIRST_REVIEW_POLICIES:

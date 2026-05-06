@@ -22,6 +22,15 @@ packages = ["momus"]
 dev = [
     "pytest",
     "pytest-tripwire[all]",
+    "ruff>=0.15.12",
+    "mypy>=1.10",
+    "pre-commit>=3.2.0",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=1.0.4",
+    "mike>=2.1",
 ]
 
 [tool.pytest.ini_options]
@@ -32,3 +41,63 @@ markers = [
   "integration: spawns pi or other subprocesses; slower; opt-in",
   "adversarial: full LLM corpus runs; cost-bounded; opt-in via -m adversarial",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["momus", "tests"]
+# Adversarial tests are frozen fixtures with intentional patterns; never format/lint them.
+extend-exclude = ["tests/adversarial"]
+
+[tool.ruff.lint]
+# Pragmatic subset: high-signal rules with low day-one noise for an app.
+# Stricter families (D/ANN/S/PL/TRY/ERA/T20) deliberately deferred until
+# the codebase has been swept once.
+select = [
+    "E", "W",       # pycodestyle
+    "F",            # pyflakes
+    "I",            # isort
+    "UP",           # pyupgrade
+    "B",            # flake8-bugbear
+    "C4",           # flake8-comprehensions
+    "G",            # flake8-logging-format
+    "PIE",          # flake8-pie
+    "PT",           # flake8-pytest-style
+    "RET",          # flake8-return
+    "SIM",          # flake8-simplify
+    "TID",          # flake8-tidy-imports
+    "FLY",          # flynt
+    "PERF",         # perflint
+    "RUF",          # ruff-specific
+]
+ignore = [
+    "ISC001",       # conflicts with formatter
+    "COM812",       # conflicts with formatter (trailing comma)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = [
+    "PT011",        # pytest.raises without `match` allowed
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+files = ["momus", "tests"]
+exclude = ["tests/adversarial/"]
+
+# tripwire is a callable-module (singleton _TripwireModule class) used as
+# a context manager (`with tripwire:`) and re-exporting `M`. mypy can't
+# see those module-level attributes; ignore attr-defined errors at usage
+# sites rather than chasing stub generation for every test.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disable_error_code = ["attr-defined"]

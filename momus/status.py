@@ -21,9 +21,7 @@ STATUS_MARKER = "<!-- momus:status -->"
 
 # Animated indicator shown for in-progress states. Pointing at axiomantic/momus
 # raw assets so updating the GIF is a one-line change in that repo.
-STATUS_GIF_URL = (
-    "https://raw.githubusercontent.com/axiomantic/momus/main/assets/working.gif"
-)
+STATUS_GIF_URL = "https://raw.githubusercontent.com/axiomantic/momus/main/assets/working.gif"
 
 
 def post_status(
@@ -62,7 +60,7 @@ def post_status(
             _create_comment(owner, repo, pr_number, body)
         else:
             _update_comment(owner, repo, comment_id, body)
-    except Exception as exc:  # noqa: BLE001 — best-effort by design
+    except Exception as exc:
         print(f"[momus.status] post failed: {exc}", file=sys.stderr, flush=True)
 
 
@@ -120,11 +118,14 @@ def _find_existing_comment(owner: str, repo: str, pr_number: int) -> int | None:
     """Find a comment containing STATUS_MARKER. Returns its id or None."""
     proc = subprocess.run(
         [
-            "gh", "api",
+            "gh",
+            "api",
             "--paginate",
             f"/repos/{owner}/{repo}/issues/{pr_number}/comments",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
@@ -153,12 +154,18 @@ def _create_comment(owner: str, repo: str, pr_number: int, body: str) -> None:
     payload = json.dumps({"body": body})
     proc = subprocess.run(
         [
-            "gh", "api",
-            "-X", "POST",
+            "gh",
+            "api",
+            "-X",
+            "POST",
             f"/repos/{owner}/{repo}/issues/{pr_number}/comments",
-            "--input", "-",
+            "--input",
+            "-",
         ],
-        input=payload, capture_output=True, text=True, check=False,
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"create comment failed: {proc.stderr.strip()}")
@@ -168,12 +175,18 @@ def _update_comment(owner: str, repo: str, comment_id: int, body: str) -> None:
     payload = json.dumps({"body": body})
     proc = subprocess.run(
         [
-            "gh", "api",
-            "-X", "PATCH",
+            "gh",
+            "api",
+            "-X",
+            "PATCH",
             f"/repos/{owner}/{repo}/issues/comments/{comment_id}",
-            "--input", "-",
+            "--input",
+            "-",
         ],
-        input=payload, capture_output=True, text=True, check=False,
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"update comment failed: {proc.stderr.strip()}")

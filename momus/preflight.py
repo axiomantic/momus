@@ -36,9 +36,7 @@ def preflight(
     hunk_lines = hunk_lines or {}
 
     for finding in findings_doc.get("findings", []):
-        action = _check_one(
-            finding, priors_by_id, repo_root, blocking_severities, hunk_lines
-        )
+        action = _check_one(finding, priors_by_id, repo_root, blocking_severities, hunk_lines)
         if action is None:
             surviving.append(finding)
         elif action["action"] == "demoted":
@@ -151,7 +149,10 @@ def _recompute_verdict(
         cur_status = status_by_id.get(prior["id"], "unfixed")
         if cur_status not in ("fixed", "removed"):
             return "REQUEST_CHANGES"
-    return "APPROVE" if findings else "APPROVE"
+    # Both branches return APPROVE intentionally: any blocking severity is
+    # caught above; non-blocking findings still APPROVE. Kept as a
+    # placeholder for future "APPROVE_WITH_NITS" semantics.
+    return "APPROVE" if findings else "APPROVE"  # noqa: RUF034
 
 
 def _is_under(path: Path, root: Path) -> bool:

@@ -23,7 +23,7 @@ your bot can actually approve clean PRs.
 
 If you'd rather not click through the GitHub UI for App creation:
 
-1. Open the **[Momus installer page](https://axiomantic.github.io/momus/install/)**.
+1. Open the **[Momus installer page](https://axiomantic.github.io/momus/latest/install/)**.
    Pick "user" or "org", click the button, GitHub creates the App from a
    pre-filled manifest, and the page hands you back the App ID and a
    downloadable private key.

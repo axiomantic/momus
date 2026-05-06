@@ -14,7 +14,8 @@ review prose.
 
 from __future__ import annotations
 
-from momus.checks import _build_summary, _finding_one_liner as _checks_one_liner
+from momus.checks import _build_summary
+from momus.checks import _finding_one_liner as _checks_one_liner
 from momus.publish import (
     _finding_inline_body,
     _finding_one_liner,
@@ -208,9 +209,7 @@ def test_finding_inline_body_redacts_id_field():
 def test_finding_inline_body_redacts_category_field():
     f = _finding_with_credentials_in_metadata()
     f["id"] = "BOT-1"
-    body = _finding_inline_body(
-        f, run_url="https://example.test/r/1", run_id="X"
-    )
+    body = _finding_inline_body(f, run_url="https://example.test/r/1", run_id="X")
     assert "ghp_" not in body
     assert "[redacted]" in body
 
