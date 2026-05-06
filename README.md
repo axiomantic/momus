@@ -90,11 +90,10 @@ provider-specific env vars.
 
 ## Triggers
 
-- `pull_request` opened / synchronize / reopened — full review
-- `issue_comment` body starting with the configured trigger command
-  (default `/ai-review`) OR containing the configured @-mention (e.g.
-  `@your-org-momus[bot]`) — re-review with prior-findings continuity
-- `workflow_dispatch` — manual run
+- `pull_request` opened / reopened — full review on first PR open
+- `workflow_dispatch` — manual re-review (provide `pr_number` input)
 
-Both `trigger_command` and `trigger_mention` are inputs on the reusable
-workflow; see [SETUP.md](SETUP.md#3-add-the-workflow).
+Re-reviews on push are intentionally NOT wired up: each run consumes
+LLM provider quota, and pushing in rapid succession during fix cycles
+will burn that quota fast. To re-review after pushing fixes, dispatch
+the workflow manually.
