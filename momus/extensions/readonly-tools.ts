@@ -276,7 +276,6 @@ const MAX_FIND_RESULTS = 5000;
 export interface GrepRepoParams {
   pattern: string;
   path?: string;
-  glob?: string;
   "-i"?: boolean;
   "-n"?: boolean;
 }
@@ -1119,7 +1118,6 @@ export default function (pi: ExtensionAPI) {
       path: Type.Optional(
         Type.String({ description: "Relative path under cwd." }),
       ),
-      glob: Type.Optional(Type.String()),
       "-i": Type.Optional(Type.Boolean()),
       "-n": Type.Optional(Type.Boolean()),
     }),
