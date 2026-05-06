@@ -140,8 +140,21 @@ export function ensureWithinCwd(
   if (input === "~" || input.startsWith("~/")) {
     return { ok: false, reason: "OutsideRepo" };
   }
-  const resolved = resolve(cwd, input);
-  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+  // Realpath the cwd itself so containment checks compare apples to apples.
+  // Without this, a workspace whose path traverses a symlink (e.g. macOS
+  // /var -> /private/var, or a CI runner that mounts the workspace via a
+  // symlinked parent) trips the parent-realpath check on every legit read:
+  // realpath(parent) returns the post-symlink form while `cwd` is still
+  // the pre-symlink form, so .startsWith(cwd + sep) fails and we reject
+  // with Symlink even though the path is inside the repo.
+  let realCwd: string;
+  try {
+    realCwd = realpathSync(cwd);
+  } catch {
+    realCwd = cwd;
+  }
+  const resolved = resolve(realCwd, input);
+  if (!resolved.startsWith(realCwd + sep) && resolved !== realCwd) {
     return { ok: false, reason: "OutsideRepo" };
   }
   // Parent-realpath: skip when the resolved path IS the cwd (no parent
@@ -149,7 +162,7 @@ export function ensureWithinCwd(
   // parent dir resolves to a path inside cwd; this catches symlinks even
   // when the leaf doesn't exist yet.
   let realFinal = resolved;
-  if (resolved !== cwd) {
+  if (resolved !== realCwd) {
     const parent = dirname(resolved);
     let realParent: string;
     try {
@@ -158,7 +171,7 @@ export function ensureWithinCwd(
       if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
       return { ok: false, reason: "InvalidArgument" };
     }
-    if (!realParent.startsWith(cwd + sep) && realParent !== cwd) {
+    if (!realParent.startsWith(realCwd + sep) && realParent !== realCwd) {
       return { ok: false, reason: "Symlink" };
     }
   }
@@ -169,7 +182,7 @@ export function ensureWithinCwd(
       if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
       return { ok: false, reason: "InvalidArgument" };
     }
-    if (!realFinal.startsWith(cwd + sep) && realFinal !== cwd) {
+    if (!realFinal.startsWith(realCwd + sep) && realFinal !== realCwd) {
       return { ok: false, reason: "Symlink" };
     }
   }

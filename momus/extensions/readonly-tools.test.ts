@@ -398,6 +398,24 @@ describe("ensureWithinCwd", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("InvalidArgument");
   });
+
+  test("accepts paths when cwd is reached via a symlinked parent", () => {
+    // Caller passes a cwd whose path traverses a symlink (real-world
+    // analogue: macOS /var -> /private/var, or a CI runner that mounts
+    // the workspace via a symlinked parent dir). Pre-fix, every legit
+    // read tripped the parent-realpath check because realpath(parent)
+    // returned the post-symlink form while the cwd argument was still
+    // the pre-symlink form. The function must now realpath the cwd
+    // internally so the comparison is consistent.
+    const real = makeCwd();
+    writeFileSync(join(real, "a.txt"), "hello\n");
+    const linkParent = mkdtempSync(join(tmpdir(), "momus-rotest-link-"));
+    const linkedCwd = join(linkParent, "ws");
+    symlinkSync(real, linkedCwd);
+    const r = ensureWithinCwd("a.txt", linkedCwd);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.resolved).toBe(join(real, "a.txt"));
+  });
 });
 
 // ---------------------------------------------------------------------------
