@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from momus.config import load_config
 from momus.render import render_phase_prompt
 
@@ -52,7 +51,7 @@ def _extract_example_finding(rendered: str) -> dict:
                 close_idx = pos
                 break
     assert close_idx != -1, "no balanced closing brace for example finding"
-    blob = rendered[open_idx:close_idx + 1]
+    blob = rendered[open_idx : close_idx + 1]
     return json.loads(blob)
 
 
@@ -97,9 +96,7 @@ def test_render_calibration_field_uses_unprefixed_key(tmp_path, cfg):
     accepts work_dir as a kwarg.
     """
     _make_work_dir(tmp_path, [])
-    rendered = render_phase_prompt(
-        "phase2", cfg, "A", Path(".work")
-    )
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
     assert '"_calibration"' not in rendered
     if cfg.review.require_calibration:
         assert '"calibration"' in rendered
@@ -155,8 +152,9 @@ def test_phase3_verify_prompt_uses_unprefixed_calibration_key():
     underscore form; the audit prompt must reference the same wire-format
     key the model emits.
     """
-    text = (Path(__file__).resolve().parent.parent /
-            "momus" / "prompts" / "phase3-verify.md").read_text()
+    text = (
+        Path(__file__).resolve().parent.parent / "momus" / "prompts" / "phase3-verify.md"
+    ).read_text()
     assert "_calibration" not in text
     assert "calibration" in text
 
@@ -173,92 +171,61 @@ def patched_phase1_prompt(tmp_path, monkeypatch):
     """
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
-    template = (
-        "Phase 1\n"
-        "WORK_DIR=<<WORK_DIR>>\n"
-        "PRIOR_THREADS:\n"
-        "<<UNTRUSTED_PRIOR_THREADS_JSON>>\n"
-    )
+    template = "Phase 1\nWORK_DIR=<<WORK_DIR>>\nPRIOR_THREADS:\n<<UNTRUSTED_PRIOR_THREADS_JSON>>\n"
     (prompts_dir / "phase1-plan.md").write_text(template)
     import momus.render as render_mod
+
     monkeypatch.setattr(render_mod, "PROMPTS_DIR", prompts_dir)
     return prompts_dir
 
 
-def test_render_substitutes_prior_threads_placeholder(
-    tmp_path, cfg, patched_phase1_prompt
-):
-    work_dir = _make_work_dir_with_threads(
-        tmp_path, [{"id": "t1", "body": "fenced data"}]
-    )
-    rendered = render_phase_prompt(
-        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
-    )
+def test_render_substitutes_prior_threads_placeholder(tmp_path, cfg, patched_phase1_prompt):
+    work_dir = _make_work_dir_with_threads(tmp_path, [{"id": "t1", "body": "fenced data"}])
+    rendered = render_phase_prompt("phase1", cfg, "A", Path(".work"), work_dir=work_dir)
     assert "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
     assert "END_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
     assert '"id": "t1"' in rendered
     assert "<<UNTRUSTED_PRIOR_THREADS_JSON>>" not in rendered
 
 
-def test_render_handles_missing_prior_threads_file(
-    tmp_path, cfg, caplog, patched_phase1_prompt
-):
+def test_render_handles_missing_prior_threads_file(tmp_path, cfg, caplog, patched_phase1_prompt):
     work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
-    rendered = render_phase_prompt(
-        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
-    )
-    assert (
-        "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n[]\nEND_UNTRUSTED_PRIOR_THREADS_JSON"
-        in rendered
-    )
+    rendered = render_phase_prompt("phase1", cfg, "A", Path(".work"), work_dir=work_dir)
+    assert "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n[]\nEND_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
     assert any("missing" in r.message for r in caplog.records)
 
 
-def test_render_does_not_double_escape_json(
-    tmp_path, cfg, patched_phase1_prompt
-):
+def test_render_does_not_double_escape_json(tmp_path, cfg, patched_phase1_prompt):
     raw = '[{"body": "a\\nb"}]'
     work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
     (work_dir / "inputs" / "prior-threads.json").write_text(raw)
-    rendered = render_phase_prompt(
-        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
-    )
+    rendered = render_phase_prompt("phase1", cfg, "A", Path(".work"), work_dir=work_dir)
     assert (
-        f"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n{raw}\nEND_UNTRUSTED_PRIOR_THREADS_JSON"
-        in rendered
+        f"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON\n{raw}\nEND_UNTRUSTED_PRIOR_THREADS_JSON" in rendered
     )
 
 
-def test_render_preserves_other_placeholders(
-    tmp_path, cfg, patched_phase1_prompt
-):
+def test_render_preserves_other_placeholders(tmp_path, cfg, patched_phase1_prompt):
     work_dir = _make_work_dir_with_threads(tmp_path, [])
-    rendered = render_phase_prompt(
-        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
-    )
+    rendered = render_phase_prompt("phase1", cfg, "A", Path(".work"), work_dir=work_dir)
     assert ".work" in rendered
     assert "<<WORK_DIR>>" not in rendered
 
 
-def test_render_fence_collision_uses_uuid_suffix(
-    tmp_path, cfg, patched_phase1_prompt
-):
+def test_render_fence_collision_uses_uuid_suffix(tmp_path, cfg, patched_phase1_prompt):
     poison = '[{"body": "BEGIN_UNTRUSTED_PRIOR_THREADS_JSON inside"}]'
     work_dir = _make_work_dir_with_threads(tmp_path, threads=None)
     (work_dir / "inputs" / "prior-threads.json").write_text(poison)
-    rendered = render_phase_prompt(
-        "phase1", cfg, "A", Path(".work"), work_dir=work_dir
-    )
-    matches = re.findall(
-        r"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON_([0-9a-f-]{36})", rendered
-    )
+    rendered = render_phase_prompt("phase1", cfg, "A", Path(".work"), work_dir=work_dir)
+    matches = re.findall(r"BEGIN_UNTRUSTED_PRIOR_THREADS_JSON_([0-9a-f-]{36})", rendered)
     assert len(matches) == 1
     suffix = matches[0]
     assert f"END_UNTRUSTED_PRIOR_THREADS_JSON_{suffix}" in rendered
 
 
 def test_phase1_prompt_no_path_reference_remaining():
-    text = (Path(__file__).resolve().parent.parent /
-            "momus" / "prompts" / "phase1-plan.md").read_text()
+    text = (
+        Path(__file__).resolve().parent.parent / "momus" / "prompts" / "phase1-plan.md"
+    ).read_text()
     assert "<<UNTRUSTED_PRIOR_THREADS_JSON>>" in text
     assert "<<WORK_DIR>>/inputs/prior-threads.json" not in text

@@ -73,8 +73,7 @@ def _substitute_prior_threads(rendered: str, work_dir: Path | None) -> str:
             body = path.read_text(encoding="utf-8")
         else:
             log.warning(
-                "render: %s missing; substituting empty array for "
-                "<<UNTRUSTED_PRIOR_THREADS_JSON>>",
+                "render: %s missing; substituting empty array for <<UNTRUSTED_PRIOR_THREADS_JSON>>",
                 path,
             )
             body = "[]"
@@ -97,7 +96,6 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
     blocking = review.blocking_severities
     blocking_str = ", ".join(f"`{s}`" for s in blocking)
 
-    nit_in_scale = "nit" in (blocking + (["nit"] if review.emit_nits else []))
     nit_scale_line = (
         "- **nit** (non-blocking): style, naming preference, minor readability."
         if review.emit_nits
@@ -151,9 +149,7 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
         )
     elif review.run_id_scheme == "numeric":
         id_example = f"BOT-{run_id}-1"
-        id_scheme = (
-            f"Use `BOT-{run_id}-N` where N is sequential within this run."
-        )
+        id_scheme = f"Use `BOT-{run_id}-N` where N is sequential within this run."
     else:
         id_example = "BOT-1"
         id_scheme = "Use `BOT-N` where N is sequential within this run."
@@ -166,8 +162,7 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
         )
     elif policy == "if_no_findings":
         first_review_rule = (
-            "On the first review of a PR, emit `APPROVE` only if `findings` "
-            "is empty."
+            "On the first review of a PR, emit `APPROVE` only if `findings` is empty."
         )
     else:
         first_review_rule = (

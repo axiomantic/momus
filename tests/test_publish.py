@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 import tripwire
-
 from momus import publish as publish_mod
 from momus.config import (
     ChecksConfig,
@@ -89,9 +88,7 @@ def test_self_pr_approve_downgrades_to_comment_with_note():
         "_Note: verdict was APPROVE but downgraded to COMMENT because the bot "
         "account is the PR author._\n\n"
     )
-    expected_body = expected_note + _expected_rendered_body(
-        findings, run_url="https://run/1"
-    )
+    expected_body = expected_note + _expected_rendered_body(findings, run_url="https://run/1")
     gh_api.assert_call(
         args=(
             "POST",
@@ -160,9 +157,7 @@ def test_bot_token_approve_downgrades_to_comment():
         "the token user `github-actions[bot]` is a Bot and cannot "
         "approve PRs._\n\n"
     )
-    expected_body = expected_note + _expected_rendered_body(
-        findings, run_url="https://run/1"
-    )
+    expected_body = expected_note + _expected_rendered_body(findings, run_url="https://run/1")
     gh_api.assert_call(
         args=(
             "POST",
@@ -335,28 +330,24 @@ def test_422_cannot_approve_apps_phrasing_also_retries():
 
 def test_422_self_approval_message_reraises_no_retry():
     """A 422 whose message indicates self-approval must re-raise without retry."""
-    err = publish_mod._GhApiError(
-        422, "HTTP 422: Can not approve your own pull request"
-    )
+    err = publish_mod._GhApiError(422, "HTTP 422: Can not approve your own pull request")
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     gh_api.raises(err)
 
-    with tripwire:
-        with pytest.raises(publish_mod._GhApiError) as excinfo:
-            publish_mod._submit_review(
-                owner="elijahr",
-                repo="lockfreequeues",
-                pr_number=25,
-                head_sha="abc",
-                body="b",
-                inline_comments=[
-                    {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
-                ],
-                event="APPROVE",
-            )
+    with tripwire, pytest.raises(publish_mod._GhApiError) as excinfo:
+        publish_mod._submit_review(
+            owner="elijahr",
+            repo="lockfreequeues",
+            pr_number=25,
+            head_sha="abc",
+            body="b",
+            inline_comments=[{"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}],
+            event="APPROVE",
+        )
     assert excinfo.value.status == 422
 
     from dirty_equals import IsInstance
+
     gh_api.assert_call(
         args=(
             "POST",
@@ -365,9 +356,7 @@ def test_422_self_approval_message_reraises_no_retry():
                 "commit_id": "abc",
                 "body": "b",
                 "event": "APPROVE",
-                "comments": [
-                    {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
-                ],
+                "comments": [{"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}],
             },
         ),
         kwargs={},
@@ -392,13 +381,12 @@ def test_422_non_self_approval_with_inline_comments_retries_body_only():
             pr_number=25,
             head_sha="abc",
             body="original body",
-            inline_comments=[
-                {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
-            ],
+            inline_comments=[{"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}],
             event="COMMENT",
         )
 
     from dirty_equals import IsInstance
+
     gh_api.assert_call(
         args=(
             "POST",
@@ -407,9 +395,7 @@ def test_422_non_self_approval_with_inline_comments_retries_body_only():
                 "commit_id": "abc",
                 "body": "original body",
                 "event": "COMMENT",
-                "comments": [
-                    {"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}
-                ],
+                "comments": [{"path": "f.py", "line": 1, "side": "RIGHT", "body": "x"}],
             },
         ),
         kwargs={},
@@ -439,20 +425,20 @@ def test_422_with_no_inline_comments_reraises():
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     gh_api.raises(err)
 
-    with tripwire:
-        with pytest.raises(publish_mod._GhApiError) as excinfo:
-            publish_mod._submit_review(
-                owner="elijahr",
-                repo="lockfreequeues",
-                pr_number=25,
-                head_sha="abc",
-                body="b",
-                inline_comments=[],
-                event="COMMENT",
-            )
+    with tripwire, pytest.raises(publish_mod._GhApiError) as excinfo:
+        publish_mod._submit_review(
+            owner="elijahr",
+            repo="lockfreequeues",
+            pr_number=25,
+            head_sha="abc",
+            body="b",
+            inline_comments=[],
+            event="COMMENT",
+        )
     assert excinfo.value.status == 422
 
     from dirty_equals import IsInstance
+
     gh_api.assert_call(
         args=(
             "POST",
@@ -488,9 +474,7 @@ def test_self_pr_check_is_case_insensitive():
         "_Note: verdict was APPROVE but downgraded to COMMENT because the bot "
         "account is the PR author._\n\n"
     )
-    expected_body = expected_note + _expected_rendered_body(
-        findings, run_url="https://run/1"
-    )
+    expected_body = expected_note + _expected_rendered_body(findings, run_url="https://run/1")
     gh_api.assert_call(
         args=(
             "POST",

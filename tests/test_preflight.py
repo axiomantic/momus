@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from momus.preflight import preflight
 
 
@@ -61,15 +60,15 @@ def test_finding_file_not_in_pr_diff_is_dropped(repo: Path):
     hunk_lines: dict[str, set[int]] = {"src/other.py": {1, 2, 3}}
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
 
     assert updated["findings"] == []
-    assert actions == [
-        {"id": "BOT-A1", "action": "dropped", "reason": "file not in PR diff"}
-    ]
+    assert actions == [{"id": "BOT-A1", "action": "dropped", "reason": "file not in PR diff"}]
 
 
 def test_finding_line_not_on_hunk_is_dropped(repo: Path):
@@ -78,15 +77,15 @@ def test_finding_line_not_on_hunk_is_dropped(repo: Path):
     hunk_lines = {"src/foo.py": {1, 2, 3, 4, 5}}
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
 
     assert updated["findings"] == []
-    assert actions == [
-        {"id": "BOT-A1", "action": "dropped", "reason": "line 7 not on a diff hunk"}
-    ]
+    assert actions == [{"id": "BOT-A1", "action": "dropped", "reason": "line 7 not on a diff hunk"}]
 
 
 def test_finding_in_hunk_line_survives(repo: Path):
@@ -95,7 +94,9 @@ def test_finding_in_hunk_line_survives(repo: Path):
     hunk_lines = {"src/foo.py": {1, 2, 3, 4, 5}}
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
@@ -113,7 +114,9 @@ def test_empty_hunk_lines_skips_off_hunk_check_and_uses_file_check(repo: Path):
     doc = _doc(findings)
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines={},
     )
@@ -131,7 +134,9 @@ def test_empty_hunk_lines_existing_file_in_range_survives(repo: Path):
     doc = _doc(findings)
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines={},
     )
@@ -149,15 +154,15 @@ def test_end_line_straddling_hunk_boundary_drops_finding(repo: Path):
     hunk_lines = {"src/foo.py": {3, 4, 6}}
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
 
     assert updated["findings"] == []
-    assert actions == [
-        {"id": "BOT-A1", "action": "dropped", "reason": "line 5 not on a diff hunk"}
-    ]
+    assert actions == [{"id": "BOT-A1", "action": "dropped", "reason": "line 5 not on a diff hunk"}]
 
 
 def test_end_line_fully_inside_hunk_survives(repo: Path):
@@ -166,7 +171,9 @@ def test_end_line_fully_inside_hunk_survives(repo: Path):
     hunk_lines = {"src/foo.py": {3, 4, 5, 6}}
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
@@ -181,7 +188,9 @@ def test_existing_malformed_finding_still_dropped(repo: Path):
     doc = _doc(findings)
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines={},
     )
@@ -198,15 +207,15 @@ def test_existing_line_past_eof_still_dropped(repo: Path):
     hunk_lines = {"src/foo.py": {999}}  # off-hunk would pass; file check should still fail
 
     updated, actions = preflight(
-        doc, prior_findings=[], repo_root=repo,
+        doc,
+        prior_findings=[],
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )
 
     assert updated["findings"] == []
-    assert actions == [
-        {"id": "BOT-A1", "action": "dropped", "reason": "line 999 > file length 20"}
-    ]
+    assert actions == [{"id": "BOT-A1", "action": "dropped", "reason": "line 999 > file length 20"}]
 
 
 def test_severity_demotion_still_works_with_hunk_lines(repo: Path):
@@ -217,7 +226,9 @@ def test_severity_demotion_still_works_with_hunk_lines(repo: Path):
     hunk_lines = {"src/foo.py": {1, 2, 3, 4, 5}}
 
     updated, actions = preflight(
-        doc, prior_findings=priors, repo_root=repo,
+        doc,
+        prior_findings=priors,
+        repo_root=repo,
         blocking_severities=["critical", "high"],
         hunk_lines=hunk_lines,
     )

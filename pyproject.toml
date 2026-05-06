@@ -46,6 +46,8 @@ markers = [
 line-length = 100
 target-version = "py311"
 src = ["momus", "tests"]
+# Adversarial tests are frozen fixtures with intentional patterns; never format/lint them.
+extend-exclude = ["tests/adversarial"]
 
 [tool.ruff.lint]
 # Pragmatic subset: high-signal rules with low day-one noise for an app.

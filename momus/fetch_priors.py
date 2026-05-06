@@ -26,9 +26,7 @@ def fetch_prior_threads(owner: str, repo: str, pr_number: int) -> list[dict[str,
     Each entry shape matches the input schema documented in
     ``prompts/phase1-plan.md``.
     """
-    review_comments = _gh_api_paginated(
-        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"
-    )
+    review_comments = _gh_api_paginated(f"/repos/{owner}/{repo}/pulls/{pr_number}/comments")
     threads = _fetch_review_threads(owner, repo, pr_number)
 
     bot_originals = [c for c in review_comments if BOT_MARKER_RE.search(c.get("body", ""))]

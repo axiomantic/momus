@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from momus.progress import (
     ProgressThrottle,
     ProgressTracker,
@@ -136,12 +135,8 @@ def test_estimate_phase_caps_floors_protect_tiny_prs() -> None:
 
 
 def test_estimate_phase_caps_scales_with_pr_size() -> None:
-    small = estimate_phase_caps(
-        n_prior_threads=0, n_touched_files=2, n_findings_estimate=2
-    )
-    big = estimate_phase_caps(
-        n_prior_threads=0, n_touched_files=20, n_findings_estimate=10
-    )
+    small = estimate_phase_caps(n_prior_threads=0, n_touched_files=2, n_findings_estimate=2)
+    big = estimate_phase_caps(n_prior_threads=0, n_touched_files=20, n_findings_estimate=10)
     assert big["phase2"] > small["phase2"]
     assert big["phase3"] > small["phase3"]
 

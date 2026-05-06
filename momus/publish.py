@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 from typing import Any
 
 from .config import Config
@@ -66,6 +65,8 @@ def redact_for_publish(text: str) -> tuple[str, int]:
         n += k
     text = OFF_DOMAIN_IMG_RE.sub("[image stripped: off-domain]", text)
     return text, n
+
+
 SEVERITY_LABELS = {
     "critical": "Critical",
     "high": "High",
@@ -103,9 +104,7 @@ def publish(
     head_sha = pr_meta["head_sha"]
     run_id = pr_meta.get("run_id", "A")
 
-    body = render_review_body(
-        findings_doc, run_url, run_id, config, phase_usages=phase_usages
-    )
+    body = render_review_body(findings_doc, run_url, run_id, config, phase_usages=phase_usages)
     inline_comments = build_inline_comments(findings_doc.findings, run_url, run_id)
     event = findings_doc.verdict
 
@@ -136,9 +135,7 @@ def publish(
         repo=repo,
         pr_number=pr_number,
         priors=priors,
-        prior_status=[
-            p.model_dump() for p in findings_doc.prior_findings_status
-        ],
+        prior_status=[p.model_dump() for p in findings_doc.prior_findings_status],
         head_sha=head_sha,
         run_url=run_url,
     )
@@ -185,14 +182,12 @@ def render_review_body(
         suffix = " (blocking)" if is_blocking else ""
         parts.append("")
         parts.append(f"### {SEVERITY_LABELS[sev]}{suffix}")
-        for f in bucket:
-            parts.append(_finding_one_liner(f))
+        parts.extend(_finding_one_liner(f) for f in bucket)
 
     if noteworthy and config.review.noteworthy_max > 0:
         parts.append("")
         parts.append("### Noteworthy")
-        for n in noteworthy[: config.review.noteworthy_max]:
-            parts.append(f"- {n}")
+        parts.extend(f"- {n}" for n in noteworthy[: config.review.noteworthy_max])
 
     parts.append("")
     parts.append(f"**Verdict:** {verdict}.")
@@ -292,7 +287,7 @@ def _hostname_from_url(url: str) -> str:
 
         parsed = urlparse(url)
         return parsed.hostname or ""
-    except Exception:  # noqa: BLE001
+    except Exception:
         return ""
 
 
@@ -325,9 +320,7 @@ def build_inline_comments(
     """
     comments: list[dict[str, Any]] = []
     for f in findings:
-        f_dict: dict[str, Any] = (
-            f.model_dump() if isinstance(f, Finding) else f
-        )
+        f_dict: dict[str, Any] = f.model_dump() if isinstance(f, Finding) else f
         body = _finding_inline_body(f_dict, run_url, run_id)
         comment: dict[str, Any] = {
             "path": f_dict["file"],
@@ -361,9 +354,7 @@ def _finding_inline_body(f: dict[str, Any], run_url: str, run_id: str) -> str:
     title, _ = redact_for_publish(title_raw)
     message, _ = redact_for_publish(message_raw)
     suggestion = (
-        redact_for_publish(suggestion_raw)[0]
-        if isinstance(suggestion_raw, str)
-        else suggestion_raw
+        redact_for_publish(suggestion_raw)[0] if isinstance(suggestion_raw, str) else suggestion_raw
     )
 
     parts = [f"**{fid}** — {SEVERITY_LABELS.get(sev, sev)} ({cat})"]
@@ -427,7 +418,10 @@ def _submit_review(
             raise
         # Otherwise: 422 typically means at least one comment cited a line
         # not on a diff hunk. Strip inline comments and retry body-only.
-        body_only = body + "\n\n_Note: inline comments were demoted to body because some line citations were not on diff hunks._"
+        body_only = body + (
+            "\n\n_Note: inline comments were demoted to body because "
+            "some line citations were not on diff hunks._"
+        )
         retry_payload = {
             "commit_id": head_sha,
             "body": body_only,
@@ -457,24 +451,17 @@ def _post_thread_replies(
         if not comment_id:
             continue
         verb = "Fixed" if status == "fixed" else "Removed"
-        reply_body = (
-            f"{verb} in `{head_sha[:7]}`. Resolving.\n\n"
-            f"<!-- run: {run_url} -->"
-        )
-        try:
+        reply_body = f"{verb} in `{head_sha[:7]}`. Resolving.\n\n<!-- run: {run_url} -->"
+        # Reply posting is best-effort; never fail the publisher on this.
+        with contextlib.suppress(_GhApiError):
             _gh_api(
                 "POST",
                 f"/repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies",
                 {"body": reply_body},
             )
-        except _GhApiError:
-            # Reply posting is best-effort; never fail the publisher on this.
-            pass
         if thread_id:
-            try:
+            with contextlib.suppress(_GhApiError):
                 _resolve_thread(thread_id)
-            except _GhApiError:
-                pass
 
 
 def _resolve_thread(thread_id: str) -> None:
@@ -520,15 +507,12 @@ def _get_token_user_info() -> dict[str, Any] | None:
 
 
 _APP_CANNOT_APPROVE_REASON = (
-    "the default GITHUB_TOKEN cannot approve PRs "
-    "(configure a GitHub App; see SETUP.md)"
+    "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
 )
 
 
 def _prepend_downgrade_note(body: str, reason: str) -> str:
-    return (
-        f"_Note: verdict was APPROVE but downgraded to COMMENT because {reason}._\n\n"
-    ) + body
+    return (f"_Note: verdict was APPROVE but downgraded to COMMENT because {reason}._\n\n") + body
 
 
 def _approve_downgrade_reason(pr_author: str | None) -> str | None:
@@ -569,11 +553,9 @@ def _is_app_cannot_approve_error(message: str) -> bool:
     lower = message.lower()
     if "must use one of the events" in lower:
         return True
-    if "cannot approve" in lower and (
+    return "cannot approve" in lower and (
         "github app" in lower or "apps" in lower or "installation" in lower
-    ):
-        return True
-    return False
+    )
 
 
 def _is_self_approval_error(message: str) -> bool:

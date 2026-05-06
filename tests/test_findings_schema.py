@@ -14,9 +14,8 @@ Field name notes:
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from momus.findings_schema import Finding, FindingsDoc
+from pydantic import ValidationError
 
 
 def _minimal_finding() -> dict:

@@ -5,12 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
 import tripwire
-
 from momus import invoke_pi as invoke_pi_mod
 from momus.invoke_pi import (
     PHASE_EXPECTED_OUTPUTS,
@@ -20,7 +18,6 @@ from momus.invoke_pi import (
     invoke_pi_phase_with_retry,
     summarize_usage,
 )
-
 
 # Shared event line that pi would emit on stdout.
 _EVENT_LINE = '{"type": "complete", "ok": true}'
@@ -100,9 +97,7 @@ def test_first_call_produces_expected_file_no_retry(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir, repo_root = _setup_work_dir(tmp_path, phase)
-    side_effect, state, captured = _fake_pi_factory(
-        work_dir, expected_rel, write_on_calls={1}
-    )
+    side_effect, state, captured = _fake_pi_factory(work_dir, expected_rel, write_on_calls={1})
 
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
@@ -127,9 +122,7 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     # Only the second call writes the file.
-    side_effect, state, captured = _fake_pi_factory(
-        work_dir, expected_rel, write_on_calls={2}
-    )
+    side_effect, state, captured = _fake_pi_factory(work_dir, expected_rel, write_on_calls={2})
 
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect).calls(side_effect)
@@ -172,24 +165,18 @@ def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir, repo_root = _setup_work_dir(tmp_path, phase)
     # Neither call writes the file.
-    side_effect, state, captured = _fake_pi_factory(
-        work_dir, expected_rel, write_on_calls=set()
-    )
+    side_effect, state, captured = _fake_pi_factory(work_dir, expected_rel, write_on_calls=set())
 
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect).calls(side_effect)
 
-    with tripwire:
-        with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     assert state["calls"] == 2
     assert len(captured) == 2
     msg = str(exc_info.value)
-    assert msg == (
-        f"phase {phase} did not produce expected output {expected_rel} "
-        "after retry"
-    )
+    assert msg == (f"phase {phase} did not produce expected output {expected_rel} after retry")
 
     for args, kwargs in captured:
         run_mock.assert_call(args=args, kwargs=kwargs)
@@ -206,9 +193,8 @@ def test_first_call_nonzero_exit_raises_no_retry(tmp_path: Path) -> None:
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
 
-    with tripwire:
-        with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     # Pre-existing behavior: non-zero exit raises immediately, no retry.
     assert state["calls"] == 1
@@ -254,9 +240,8 @@ def test_provider_error_in_message_end_raises(tmp_path: Path) -> None:
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
 
-    with tripwire:
-        with pytest.raises(PiInvocationError) as exc_info:
-            invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
     # Single call — no retry on provider error.
     assert state["calls"] == 1
@@ -301,9 +286,7 @@ def test_pi_spawned_with_cwd_repo_root_and_workdir_env(tmp_path: Path) -> None:
     phase = "phase2"
     expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
     work_dir, repo_root = _setup_work_dir(tmp_path, phase)
-    side_effect, state, captured = _fake_pi_factory(
-        work_dir, expected_rel, write_on_calls={1}
-    )
+    side_effect, state, captured = _fake_pi_factory(work_dir, expected_rel, write_on_calls={1})
 
     run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
     run_mock.calls(side_effect)
@@ -364,8 +347,14 @@ def test_log_event_suppresses_streaming_deltas(
     for noisy in [
         {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "Hi"}},
         {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}},
-        {"type": "message_update", "assistantMessageEvent": {"type": "toolcall_delta", "delta": "x"}},
-        {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "x"}},
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "toolcall_delta", "delta": "x"},
+        },
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "thinking_delta", "delta": "x"},
+        },
         {"type": "message_update", "assistantMessageEvent": {"type": "done", "reason": "stop"}},
         {"type": "message_start"},
         {"type": "message_end"},
@@ -414,9 +403,7 @@ def test_log_event_emits_tool_execution_start_and_end(
         "result": {"content": [{"type": "text", "text": "total 4\nfile.txt"}]},
     }
     assert "[momus.pi phase2] running bash: command=ls -la" in _capture_log(start, capsys)
-    assert "[momus.pi phase2] tool_result bash: total 4 \\n file.txt" in _capture_log(
-        end, capsys
-    )
+    assert "[momus.pi phase2] tool_result bash: total 4 \\n file.txt" in _capture_log(end, capsys)
 
 
 def test_log_event_marks_tool_errors(capsys: pytest.CaptureFixture[str]) -> None:
@@ -439,9 +426,7 @@ def test_log_event_lifecycle_events_pass_through(
     assert "[momus.pi phase2] compaction_start reason=threshold" in out
 
 
-def test_render_phase_prompt_called_with_work_dir_for_phase1(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_render_phase_prompt_called_with_work_dir_for_phase1(monkeypatch, tmp_path: Path) -> None:
     """Phase 1 invocations of ``render_phase_prompt`` must pass the
     absolute ``work_dir`` as a kwarg so the path-loaded
     ``<<UNTRUSTED_PRIOR_THREADS_JSON>>`` placeholder can fence the file
@@ -550,7 +535,8 @@ def _scrubbed_env(monkeypatch):
             monkeypatch.delenv(k, raising=False)
 
 
-def test_pi_env_includes_path_home_lang(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_includes_path_home_lang(monkeypatch, tmp_path):
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     work_dir = tmp_path / "w"
     work_dir.mkdir()
@@ -560,7 +546,8 @@ def test_pi_env_includes_path_home_lang(monkeypatch, tmp_path, _scrubbed_env):
     assert env.get("LANG") == "en_US.UTF-8"
 
 
-def test_pi_env_excludes_github_token(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_excludes_github_token(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_secret")
     work_dir = tmp_path / "w"
     work_dir.mkdir()
@@ -568,7 +555,8 @@ def test_pi_env_excludes_github_token(monkeypatch, tmp_path, _scrubbed_env):
     assert "GITHUB_TOKEN" not in env
 
 
-def test_pi_env_excludes_arbitrary_secret(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_excludes_arbitrary_secret(monkeypatch, tmp_path):
     monkeypatch.setenv("MY_CUSTOM_SECRET", "shhh")
     work_dir = tmp_path / "w"
     work_dir.mkdir()
@@ -576,7 +564,8 @@ def test_pi_env_excludes_arbitrary_secret(monkeypatch, tmp_path, _scrubbed_env):
     assert "MY_CUSTOM_SECRET" not in env
 
 
-def test_pi_env_passes_lc_glob(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passes_lc_glob(monkeypatch, tmp_path):
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
     monkeypatch.setenv("LC_CTYPE", "en_US.UTF-8")
     work_dir = tmp_path / "w"
@@ -586,7 +575,8 @@ def test_pi_env_passes_lc_glob(monkeypatch, tmp_path, _scrubbed_env):
     assert env.get("LC_CTYPE") == "en_US.UTF-8"
 
 
-def test_pi_env_passes_language(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passes_language(monkeypatch, tmp_path):
     monkeypatch.setenv("LANGUAGE", "en_US")
     work_dir = tmp_path / "w"
     work_dir.mkdir()
@@ -594,7 +584,8 @@ def test_pi_env_passes_language(monkeypatch, tmp_path, _scrubbed_env):
     assert env.get("LANGUAGE") == "en_US"
 
 
-def test_pi_env_includes_llm_api_key(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_includes_llm_api_key(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_API_KEY", "k")
     monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com")
     monkeypatch.setenv("LLM_MODEL", "model-x")
@@ -606,9 +597,8 @@ def test_pi_env_includes_llm_api_key(monkeypatch, tmp_path, _scrubbed_env):
     assert env.get("LLM_MODEL") == "model-x"
 
 
-def test_pi_env_passthrough_passes_listed_keys(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_passes_listed_keys(monkeypatch, tmp_path):
     monkeypatch.setenv("FOO", "x")
     monkeypatch.setenv("BAR", "y")
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO,BAR")
@@ -619,9 +609,8 @@ def test_pi_env_passthrough_passes_listed_keys(
     assert env.get("BAR") == "y"
 
 
-def test_pi_env_passthrough_rejects_lowercase_keys(
-    monkeypatch, tmp_path, _scrubbed_env, caplog
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_rejects_lowercase_keys(monkeypatch, tmp_path, caplog):
     monkeypatch.setenv("foo", "x")
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "foo")
     work_dir = tmp_path / "w"
@@ -632,15 +621,13 @@ def test_pi_env_passthrough_rejects_lowercase_keys(
     # D3: skipped passthrough keys are logged at INFO level.
     info_records = [r for r in caplog.records if r.levelno == logging.INFO]
     assert any(
-        "pi_env_passthrough_skipped_invalid_key" in r.getMessage()
-        or "foo" in r.getMessage()
+        "pi_env_passthrough_skipped_invalid_key" in r.getMessage() or "foo" in r.getMessage()
         for r in info_records
     )
 
 
-def test_pi_env_passthrough_skips_digit_leading(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_skips_digit_leading(monkeypatch, tmp_path):
     monkeypatch.setenv("1FOO", "x")
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "1FOO")
     work_dir = tmp_path / "w"
@@ -649,9 +636,8 @@ def test_pi_env_passthrough_skips_digit_leading(
     assert "1FOO" not in env
 
 
-def test_pi_env_passthrough_skips_key_with_space(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_skips_key_with_space(monkeypatch, tmp_path):
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO BAR")
     work_dir = tmp_path / "w"
     work_dir.mkdir()
@@ -661,9 +647,8 @@ def test_pi_env_passthrough_skips_key_with_space(
     assert "BAR" not in env
 
 
-def test_pi_env_passthrough_skips_keys_not_set_on_parent(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_skips_keys_not_set_on_parent(monkeypatch, tmp_path):
     # MOMUS_PI_ENV_PASSTHROUGH lists FOO, but FOO is not set in parent env.
     # No KeyError; FOO simply not added.
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "FOO")
@@ -673,9 +658,8 @@ def test_pi_env_passthrough_skips_keys_not_set_on_parent(
     assert "FOO" not in env
 
 
-def test_pi_env_passthrough_does_not_override_momus_work_dir(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_does_not_override_momus_work_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("MOMUS_WORK_DIR", "/should/not/win")
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_WORK_DIR")
     work_dir = tmp_path / "w"
@@ -685,9 +669,8 @@ def test_pi_env_passthrough_does_not_override_momus_work_dir(
     assert env["MOMUS_WORK_DIR"] == "w"
 
 
-def test_pi_env_passthrough_skips_reserved_toolcall_log(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_skips_reserved_toolcall_log(monkeypatch, tmp_path):
     monkeypatch.setenv("MOMUS_TOOLCALL_LOG", "/tmp/tc.jsonl")
     monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_TOOLCALL_LOG")
     work_dir = tmp_path / "w"
@@ -698,16 +681,16 @@ def test_pi_env_passthrough_skips_reserved_toolcall_log(
     assert "MOMUS_TOOLCALL_LOG" not in env
 
 
-def test_pi_env_sets_momus_work_dir_relative(monkeypatch, tmp_path, _scrubbed_env):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_sets_momus_work_dir_relative(monkeypatch, tmp_path):
     work_dir = tmp_path / "nested" / "wd"
     work_dir.mkdir(parents=True)
     env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
     assert env["MOMUS_WORK_DIR"] == str(Path("nested") / "wd")
 
 
-def test_pi_env_does_not_mutate_os_environ(
-    monkeypatch, tmp_path, _scrubbed_env
-):
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_does_not_mutate_os_environ(monkeypatch, tmp_path):
     snapshot = dict(os.environ)
     work_dir = tmp_path / "w"
     work_dir.mkdir()

@@ -5,12 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 
-import pytest
 import tripwire
-
 from momus import status as status_mod
 from momus.status import STATUS_GIF_URL, STATUS_MARKER, post_status
-
 
 # --- _render_body ------------------------------------------------------------
 
@@ -31,9 +28,7 @@ def test_render_body_terminal_states_omit_gif() -> None:
 
 
 def test_render_body_includes_run_url_when_provided() -> None:
-    body = status_mod._render_body(
-        state="running", detail="phase 2/3", run_url="https://x/run/1"
-    )
+    body = status_mod._render_body(state="running", detail="phase 2/3", run_url="https://x/run/1")
     assert "[run log](https://x/run/1)" in body
 
 
@@ -49,9 +44,7 @@ def test_render_body_failed_includes_detail() -> None:
 
 
 def _gh_proc(stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(
-        args=["gh"], returncode=returncode, stdout=stdout, stderr=""
-    )
+    return subprocess.CompletedProcess(args=["gh"], returncode=returncode, stdout=stdout, stderr="")
 
 
 def _captured_run_factory():
@@ -76,7 +69,7 @@ def _captured_run_factory():
 
 def test_post_status_creates_comment_when_none_exists() -> None:
     side_effect, captured, queue = _captured_run_factory()
-    queue.append(_gh_proc(stdout="[]"))           # list -> empty
+    queue.append(_gh_proc(stdout="[]"))  # list -> empty
     queue.append(_gh_proc(stdout='{"id": 999}'))  # create
 
     run_mock = tripwire.mock.object(status_mod.subprocess, "run")
@@ -112,7 +105,7 @@ def test_post_status_updates_existing_comment_when_marker_found() -> None:
         ]
     )
     side_effect, captured, queue = _captured_run_factory()
-    queue.append(_gh_proc(stdout=existing))       # list
+    queue.append(_gh_proc(stdout=existing))  # list
     queue.append(_gh_proc(stdout='{"id": 222}'))  # update
 
     run_mock = tripwire.mock.object(status_mod.subprocess, "run")

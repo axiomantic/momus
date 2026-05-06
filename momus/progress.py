@@ -105,13 +105,13 @@ class ProgressTracker:
         return min(total, 1.0)
 
     def percent(self) -> int:
-        return int(round(self.fraction() * 100))
+        return round(self.fraction() * 100)
 
     def bar(self, width: int = 20) -> str:
         """Render a unicode progress bar of the given character width."""
         if width <= 0:
             return ""
-        filled = int(round(self.fraction() * width))
+        filled = round(self.fraction() * width)
         filled = max(0, min(filled, width))
         return "█" * filled + "░" * (width - filled)
 
