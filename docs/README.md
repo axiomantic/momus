@@ -13,7 +13,7 @@ Once, in the repo settings:
 
 The installer page is then live at
 `https://<owner>.github.io/<repo>/install/`. For
-`axiomantic/momus`: <https://axiomantic.github.io/momus/install/>.
+`axiomantic/momus`: <https://axiomantic.github.io/momus/latest/install/>.
 
 ## What's here
 
