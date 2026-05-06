@@ -361,12 +361,23 @@ def _read_outputs_json(path: Path, default: Any = None) -> Any:
     return json.loads(path.read_text())
 
 
+class FindingsValidationError(RuntimeError):
+    """Raised when the LLM-emitted findings.json fails Pydantic validation.
+
+    Caught by the orchestrator's outer Exception handler in `main()` so
+    the failure surfaces as a `failed` status and PR-visible error,
+    rather than a silent SystemExit that bypasses status reporting.
+    """
+
+
 def _read_findings_doc(path: Path) -> FindingsDoc:
     """Read and validate findings.json against the FindingsDoc schema (W5).
 
-    Validation failures fail-closed: log a clear line to stderr and
-    `sys.exit(1)`. The publisher is never called and no PR comment is
-    posted. This is the W5 contract — schema rejection is a fatal error.
+    Validation failures fail-closed: log structured detail to stderr and
+    raise `FindingsValidationError`. The orchestrator's outer handler
+    converts this into a status update + PR error comment so the run
+    fails visibly instead of dying silently. The publisher is never
+    called on a malformed doc; that's still the W5 contract.
     """
     if not path.exists():
         raise FileNotFoundError(f"expected output not produced: {path}")
@@ -384,7 +395,9 @@ def _read_findings_doc(path: Path) -> FindingsDoc:
             lines.append(f"  - {loc}: {err.get('msg', '')}")
         message = "\n".join(lines)
         print(message, file=sys.stderr)
-        sys.exit(1)
+        # First line of the message is what main()'s handler surfaces to
+        # the PR, keeping detail in the action log only.
+        raise FindingsValidationError(lines[0])
 
 
 def _guess_run_url() -> str:

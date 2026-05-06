@@ -153,22 +153,25 @@ def test_publish_rejects_malformed_doc_and_does_not_post():
 
 def test_main_read_outputs_json_validates_findings_against_schema(tmp_path):
     """`_read_outputs_json` (or its replacement) validates findings.json
-    against the FindingsDoc schema and exits nonzero on malformed input.
+    against the FindingsDoc schema and raises on malformed input.
 
     This is the entry-point gate: the orchestrator MUST reject before the
-    publish call, with a clear log line containing
-    `findings.json schema validation failed:` and the pydantic error.
+    publish call, raising `FindingsValidationError` so `main()`'s outer
+    Exception handler can surface a `failed` status + PR error comment.
+    A bare SystemExit would skip that handler entirely.
     """
-    from momus.__main__ import _read_findings_doc
+    from momus.__main__ import FindingsValidationError, _read_findings_doc
 
     findings_path = tmp_path / "findings.json"
     bad = _valid_findings_dict()
     bad["shell_command"] = "rm -rf /"
     findings_path.write_text(__import__("json").dumps(bad))
 
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(FindingsValidationError) as excinfo:
         _read_findings_doc(findings_path)
-    assert excinfo.value.code != 0
+    # Message is the first line of the validation log so it's safe to
+    # surface unredacted to the PR via main()'s error handler.
+    assert "findings.json schema validation failed" in str(excinfo.value)
 
 
 def test_main_read_outputs_json_logs_validation_error_with_clear_message(
@@ -176,14 +179,14 @@ def test_main_read_outputs_json_logs_validation_error_with_clear_message(
 ):
     """The validation-failure log line names the file and includes the
     pydantic error so a human reading the action log can tell what failed."""
-    from momus.__main__ import _read_findings_doc
+    from momus.__main__ import FindingsValidationError, _read_findings_doc
 
     findings_path = tmp_path / "findings.json"
     bad = _valid_findings_dict()
     bad["findings"][0]["severity"] = "catastrophic"  # not in enum
     findings_path.write_text(__import__("json").dumps(bad))
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(FindingsValidationError):
         _read_findings_doc(findings_path)
 
     captured = capsys.readouterr()
