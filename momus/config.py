@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]  # types-PyYAML stubs not in dev deps
 
 DEFAULTS_PATH = Path(__file__).resolve().parent / "config-defaults.yaml"
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "low", "nit"}

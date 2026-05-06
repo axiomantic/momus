@@ -141,8 +141,9 @@ def test_approve_downgrade_retry_preserves_redaction(
     # Inline-comment body still carries the redaction marker (sanity-
     # checked via a direct string assertion to defend against a future
     # change that introduces a different "redacted" sentinel).
-    assert "[redacted]" in inline[0]["body"]
-    assert "ghp_" not in inline[0]["body"]
+    inline_body = str(inline[0]["body"])
+    assert "[redacted]" in inline_body
+    assert "ghp_" not in inline_body
 
 
 def test_off_hunk_demote_retry_preserves_redaction(

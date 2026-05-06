@@ -151,7 +151,9 @@ def _run(
             "phase1",
             work_dir,
             repo_root,
-            on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
+            on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),  # type: ignore[arg-type,func-returns-value,misc]
+            # mypy: tick()/_post_progress() return None; the tuple wrapper is
+            # an idiomatic two-call lambda. Runtime ignores the return value.
         )
         phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
@@ -170,7 +172,7 @@ def _run(
         "phase2",
         work_dir,
         repo_root,
-        on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
+        on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),  # type: ignore[arg-type,func-returns-value]
     )
     phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
@@ -198,7 +200,7 @@ def _run(
             "phase3",
             work_dir,
             repo_root,
-            on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
+            on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),  # type: ignore[arg-type,func-returns-value]
         )
         phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")

@@ -92,3 +92,12 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 check_untyped_defs = true
 files = ["momus", "tests"]
+exclude = ["tests/adversarial/"]
+
+# tripwire is a callable-module (singleton _TripwireModule class) used as
+# a context manager (`with tripwire:`) and re-exporting `M`. mypy can't
+# see those module-level attributes; ignore attr-defined errors at usage
+# sites rather than chasing stub generation for every test.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disable_error_code = ["attr-defined"]

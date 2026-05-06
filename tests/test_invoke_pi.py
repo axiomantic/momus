@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,7 @@ class _FakePopen:
     def __init__(self, returncode: int, stdout_text: str) -> None:
         self.returncode = returncode
         self.stdout = iter(stdout_text.splitlines(keepends=True))
-        self.stderr = iter([])
+        self.stderr: Iterator[str] = iter([])
 
     def __enter__(self):
         return self
@@ -344,7 +345,7 @@ def test_log_event_suppresses_streaming_deltas(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     # text_delta, toolcall_delta, *_start, message_start/end are all noise.
-    for noisy in [
+    noisy_events: list[dict] = [
         {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "Hi"}},
         {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}},
         {
@@ -359,7 +360,8 @@ def test_log_event_suppresses_streaming_deltas(
         {"type": "message_start"},
         {"type": "message_end"},
         {"type": "tool_execution_update", "toolName": "bash"},
-    ]:
+    ]
+    for noisy in noisy_events:
         assert _capture_log(noisy, capsys) == "", f"should suppress: {noisy}"
 
 
