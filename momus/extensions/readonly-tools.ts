@@ -25,6 +25,7 @@ import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -422,9 +423,17 @@ export async function executeFindRepo(
       truncated = true;
       return;
     }
+    // BOT-A1: lstatSync (not statSync) so `type: "symlink"` actually
+    // matches symlinks. statSync follows symlinks and reports the target's
+    // type, so a symlink to a file would be misreported as a regular file
+    // and `isSymbolicLink()` would never be true. lstatSync inspects the
+    // link itself. As a side benefit, symlinks-to-directories are NOT
+    // auto-followed into recursion (lst.isDirectory() is false for links),
+    // which matches `find -type` semantics and avoids re-following the
+    // same dir through a link.
     let st;
     try {
-      st = statSync(abs);
+      st = lstatSync(abs);
     } catch {
       return;
     }

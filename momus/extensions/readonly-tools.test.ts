@@ -564,6 +564,52 @@ describe("find_repo", () => {
     expect(result.isError).toBe(true);
     expect(result.details.error).toBe("NotFound");
   });
+
+  test("find_repo_finds_symlink_when_type_is_symlink", async () => {
+    // BOT-A1: prior to the fix, find_repo used statSync to determine type,
+    // which follows symlinks and reports the underlying file/dir type.
+    // `type: "symlink"` therefore never matched anything. With lstatSync
+    // for the type check, a symlink in tmp_path is reported as a symlink
+    // and returned.
+    const cwd = makeCwd();
+    const target = join(cwd, "real.txt");
+    writeFileSync(target, "hello\n");
+    symlinkSync(target, join(cwd, "link.txt"));
+    const result = await executeFindRepo(
+      { path: ".", type: "symlink" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual(["link.txt"]);
+  });
+
+  test("find_repo_does_not_return_regular_files_when_type_is_symlink", async () => {
+    // Sanity: with type=symlink, plain files MUST NOT be returned.
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "plain.txt"), "x\n");
+    const result = await executeFindRepo(
+      { path: ".", type: "symlink" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual([]);
+  });
+
+  test("find_repo_type_file_still_excludes_symlinks", async () => {
+    // The flip side: with type=file, a symlink to a file should NOT be
+    // counted (lstat reports it as a symlink, not a file). This guards
+    // against accidentally widening type=file to include symlinks.
+    const cwd = makeCwd();
+    const target = join(cwd, "real.txt");
+    writeFileSync(target, "hello\n");
+    symlinkSync(target, join(cwd, "link.txt"));
+    const result = await executeFindRepo(
+      { path: ".", type: "file" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual(["real.txt"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
