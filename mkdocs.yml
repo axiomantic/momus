@@ -68,7 +68,33 @@ extra:
 
 nav:
   - Home: index.md
-  - Usage: usage.md
+  - Tutorial:
+      - First review: tutorial/first-review.md
+  - How-to:
+      - Configure blocking severities: how-to/configure-blocking-severities.md
+      - Add convention files: how-to/add-convention-files.md
+      - Configure emphasis: how-to/configure-emphasis.md
+      - Set up the GitHub App: how-to/set-up-github-app.md
+      - Use a different LLM provider: how-to/use-different-llm-provider.md
+      - Tune cost vs thoroughness: how-to/tune-cost-vs-thoroughness.md
+      - Debug a review: how-to/debug-a-review.md
+      - Extend env passthrough: how-to/extend-env-passthrough.md
+  - Reference:
+      - Action inputs: reference/action-inputs.md
+      - Config schema: reference/config-schema.md
+      - Prompt tokens: reference/prompt-tokens.md
+      - Emphasis modules: reference/emphasis-modules.md
+      - CLI: reference/cli.md
+  - Explanation:
+      - Four-phase pipeline: explanation/four-phase-pipeline.md
+      - Review philosophy: explanation/review-philosophy.md
+      - Threat model: explanation/threat-model.md
+      - Adversarial corpus: explanation/adversarial-corpus.md
+  - Contributing:
+      - Dev loop: contributing/dev-loop.md
+      - Adversarial corpus: contributing/adversarial-corpus.md
+      - Modifying prompts: contributing/modifying-prompts.md
+      - Release process: contributing/release-process.md
 
 # README.md predates mkdocs and documents the legacy /docs static-asset
 # layout served directly via GitHub Pages. Once docs are published via

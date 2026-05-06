@@ -229,3 +229,165 @@ def test_phase1_prompt_no_path_reference_remaining():
     ).read_text()
     assert "<<UNTRUSTED_PRIOR_THREADS_JSON>>" in text
     assert "<<WORK_DIR>>/inputs/prior-threads.json" not in text
+
+
+# --- Emphasis modules: composable <<REPO_EMPHASIS>> blocks ---
+
+
+def _write_repo_yaml(tmp_path: Path, body: str) -> None:
+    (tmp_path / ".momus.yaml").write_text(body, encoding="utf-8")
+
+
+def test_repo_emphasis_falls_back_when_no_modules_and_no_string(tmp_path: Path) -> None:
+    """With both ``emphasis_modules: []`` and empty ``repo_emphasis``,
+    rendered prompts must keep the original ``(none configured...)``
+    placeholder so existing zero-config repos see no behavior change.
+    """
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "(none configured for this repo)" in rendered
+
+
+def test_repo_emphasis_renders_security_module_text(tmp_path: Path) -> None:
+    """Selecting the ``security`` module must inline its body into the
+    rendered phase-2 prompt under ``<<REPO_EMPHASIS>>``. Multiple
+    distinctive substrings are asserted so a module truncated to a
+    single bullet would still fail this test.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [security]
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "command injection" in rendered
+    assert "path traversal" in rendered
+    assert "deserialization" in rendered
+    # Fallback placeholder must NOT appear when a module is active.
+    assert "(none configured for this repo)" not in rendered
+
+
+def test_repo_emphasis_combines_module_and_free_form_string(tmp_path: Path) -> None:
+    """``emphasis_modules`` and ``repo_emphasis`` compose ADDITIVELY: the
+    rendered prompt must contain BOTH the module's distinctive text AND
+    the free-form custom note.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [security]
+  repo_emphasis: "Custom note from repo"
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "command injection" in rendered
+    assert "Custom note from repo" in rendered
+    # Module body must appear BEFORE the free-form note so module guidance
+    # frames the custom emphasis rather than trailing it.
+    module_idx = rendered.find("command injection")
+    free_form_idx = rendered.find("Custom note from repo")
+    assert module_idx < free_form_idx
+
+
+def test_repo_emphasis_free_form_only_no_modules(tmp_path: Path) -> None:
+    """With ``emphasis_modules: []`` and a non-empty ``repo_emphasis``,
+    the free-form note must render and the ``(none configured...)``
+    fallback must NOT trigger.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: []
+  repo_emphasis: "Solo repo note"
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "Solo repo note" in rendered
+    assert "(none configured for this repo)" not in rendered
+
+
+def test_repo_emphasis_dead_code_module_renders(tmp_path: Path) -> None:
+    """``dead_code`` module must surface multiple distinctive keywords
+    (``unreferenced`` for unused symbols, ``unreachable`` for dead
+    branches) so a one-bullet truncation would still fail this test.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [dead_code]
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "unreferenced" in rendered
+    assert "unreachable" in rendered
+
+
+def test_repo_emphasis_quality_checklist_module_renders(tmp_path: Path) -> None:
+    """``quality_checklist`` module must surface multiple distinctive
+    keywords (``blanket`` for broad try/except/catch, ``resource leaks``
+    for unmanaged file/connection handles) so a one-bullet truncation
+    would still fail this test.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [quality_checklist]
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "blanket" in rendered
+    assert "resource leaks" in rendered
+
+
+def test_repo_emphasis_test_quality_module_renders(tmp_path: Path) -> None:
+    """``test_quality`` module must surface multiple distinctive
+    keywords (``green-mirage`` taxonomy header and ``Tautological``
+    pattern label) so a one-bullet truncation would still fail this
+    test.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [test_quality]
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    assert "green-mirage" in rendered
+    assert "Tautological" in rendered
+
+
+def test_repo_emphasis_multiple_modules_concat_in_order(tmp_path: Path) -> None:
+    """Multiple modules must concatenate in declared order; both
+    distinctive markers must appear and ``security`` must appear before
+    ``dead_code``.
+    """
+    _write_repo_yaml(
+        tmp_path,
+        """
+review:
+  emphasis_modules: [security, dead_code]
+""",
+    )
+    cfg = load_config(tmp_path)
+    rendered = render_phase_prompt("phase2", cfg, "A", Path(".work"))
+    sec_idx = rendered.find("command injection")
+    dead_idx = rendered.find("unreferenced")
+    assert sec_idx != -1
+    assert dead_idx != -1
+    assert sec_idx < dead_idx
+    # Modules must be separated by a blank line; this catches a
+    # ``"\n".join`` or ``"".join`` mutation that would still preserve order.
+    assert "\n\n" in rendered[sec_idx:dead_idx]
