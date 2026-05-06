@@ -14,9 +14,11 @@ import tripwire
 from momus import invoke_pi as invoke_pi_mod
 from momus.invoke_pi import (
     PHASE_EXPECTED_OUTPUTS,
+    PhaseUsage,
     PiInvocationError,
     invoke_pi_phase,
     invoke_pi_phase_with_retry,
+    summarize_usage,
 )
 
 
@@ -135,8 +137,11 @@ def test_first_call_missing_file_retry_succeeds(tmp_path: Path) -> None:
     with tripwire:
         events = invoke_pi_phase_with_retry(phase, work_dir, repo_root)
 
-    # Returned events come from the second (successful) call.
-    assert events == [_EVENT_PARSED]
+    # Returned events are concatenated across both invocations so
+    # summarize_usage can charge the caller for tokens consumed by the
+    # failed first attempt AND the retry. Each fake invocation emits one
+    # event line; combined we expect two copies.
+    assert events == [_EVENT_PARSED, _EVENT_PARSED]
     assert state["calls"] == 2
     assert len(captured) == 2
 
@@ -708,3 +713,97 @@ def test_pi_env_does_not_mutate_os_environ(
     work_dir.mkdir()
     invoke_pi_mod._build_pi_env(work_dir, tmp_path)
     assert dict(os.environ) == snapshot
+
+
+# ---------------------------------------------------------------------------
+# summarize_usage: cost + token totals from pi event stream
+# ---------------------------------------------------------------------------
+
+
+def _turn_end(input_t: int, output_t: int, total_cost: float) -> dict:
+    """Build a turn_end event the way pi-ai emits it: usage on the
+    assistant message, with cost.total computed by pi-ai's calculateCost.
+    """
+    return {
+        "type": "turn_end",
+        "message": {
+            "usage": {
+                "input": input_t,
+                "output": output_t,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "totalTokens": input_t + output_t,
+                "cost": {
+                    "input": 0.0,
+                    "output": 0.0,
+                    "cacheRead": 0.0,
+                    "cacheWrite": 0.0,
+                    "total": total_cost,
+                },
+            },
+        },
+    }
+
+
+def test_summarize_usage_sums_turn_end_costs(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "deepseek/deepseek-v4-pro")
+    events = [
+        {"type": "turn_start"},
+        _turn_end(100, 20, 0.001),
+        {"type": "tool_execution_end"},
+        _turn_end(200, 50, 0.0025),
+    ]
+    u = summarize_usage(events)
+    assert u == PhaseUsage(
+        cost_usd=0.0035,
+        input_tokens=300,
+        output_tokens=70,
+        cached_tokens=0,
+        model="deepseek/deepseek-v4-pro",
+    )
+
+
+def test_summarize_usage_ignores_message_end_to_avoid_double_counting(
+    monkeypatch,
+):
+    # Pi emits message_end and turn_end with the same usage block at the
+    # close of every turn. summarize_usage must only count one of them so
+    # the total isn't doubled.
+    monkeypatch.setenv("LLM_MODEL", "deepseek/deepseek-v4-pro")
+    paired = _turn_end(100, 20, 0.001)
+    message_end = {**paired, "type": "message_end"}
+    events = [message_end, paired]
+    u = summarize_usage(events)
+    assert u.cost_usd == 0.001
+    assert u.input_tokens == 100
+
+
+def test_summarize_usage_zero_when_no_turn_end_events(monkeypatch):
+    # Phase aborted before the first turn (e.g. provider rate limit on
+    # the very first request). No usage is emitted; totals stay at zero.
+    monkeypatch.setenv("LLM_MODEL", "deepseek/deepseek-v4-pro")
+    events = [{"type": "turn_start"}, {"type": "agent_end"}]
+    u = summarize_usage(events)
+    assert u.cost_usd == 0.0
+    assert u.input_tokens == 0
+    assert u.output_tokens == 0
+
+
+def test_summarize_usage_handles_missing_cost_fields(monkeypatch):
+    # Defensive: an event with usage but no cost subobject (e.g. a model
+    # whose cost was zeroed at provider registration) reports tokens but
+    # zero cost rather than KeyError.
+    monkeypatch.setenv("LLM_MODEL", "unknown-model")
+    events = [
+        {
+            "type": "turn_end",
+            "message": {
+                "usage": {"input": 50, "output": 10, "totalTokens": 60},
+            },
+        },
+    ]
+    u = summarize_usage(events)
+    assert u.cost_usd == 0.0
+    assert u.input_tokens == 50
+    assert u.output_tokens == 10
+    assert u.model == "unknown-model"

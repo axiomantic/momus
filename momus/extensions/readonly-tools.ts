@@ -36,6 +36,7 @@ import {
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getModels, getProviders } from "@mariozechner/pi-ai";
 
 const ALLOWED_BINS = new Set([
   "git",
@@ -192,6 +193,36 @@ export function ensureWithinCwd(
     }
   }
   return { ok: true, resolved: realFinal };
+}
+
+/**
+ * Look up per-Mtok pricing for a given model id by scanning pi-ai's
+ * bundled MODELS registry across every provider. Returns zeros when the
+ * id is unknown so the BYO provider registration still succeeds — momus
+ * detects the all-zero case downstream and omits the cost footer rather
+ * than reporting a misleading $0.00.
+ *
+ * Exported for unit tests; not part of the public extension surface.
+ */
+export function lookupModelCost(modelId: string): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id === modelId && m.cost) {
+        return {
+          input: m.cost.input ?? 0,
+          output: m.cost.output ?? 0,
+          cacheRead: m.cost.cacheRead ?? 0,
+          cacheWrite: m.cost.cacheWrite ?? 0,
+        };
+      }
+    }
+  }
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 }
 
 function toolError(reason: ErrorReason, path: string) {
@@ -1054,6 +1085,20 @@ export default function (pi: ExtensionAPI) {
         "this env var to obtain the API key for the 'byo' provider.",
     );
   }
+  // Pull pricing from pi-ai's bundled model registry so per-turn cost is
+  // populated on every assistant message event. Pi-ai's calculateCost runs
+  // inside the streaming response handler and writes usage.cost.{input,
+  // output,cacheRead,cacheWrite,total} on each message; momus then sums
+  // those at agent_end and renders the total in the review footer.
+  //
+  // Lookup strategy: scan every registered provider for a model whose id
+  // matches LLM_MODEL exactly. We don't constrain to "openrouter" because
+  // the same id is sometimes registered under multiple providers
+  // (deepseek/deepseek-v4-pro lives under both "openrouter" and direct
+  // "deepseek"). First match wins; in practice the pricing converges.
+  // If no match, fall back to zeros and momus suppresses the cost line —
+  // tokens still surface so a magnitude check is possible.
+  const cost = lookupModelCost(model);
   pi.registerProvider("byo", {
     name: "BYO (OpenAI-compatible)",
     baseUrl,
@@ -1065,7 +1110,7 @@ export default function (pi: ExtensionAPI) {
         name: model,
         reasoning: false,
         input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        cost,
         contextWindow: 128000,
         maxTokens: 8192,
       },

@@ -12,6 +12,7 @@ from typing import Any
 
 from .config import Config
 from .findings_schema import Finding, FindingsDoc
+from .invoke_pi import PhaseUsage
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "nit"]
 
@@ -84,6 +85,7 @@ def publish(
     pr_meta: dict[str, Any],
     config: Config,
     run_url: str,
+    phase_usages: list[tuple[str, PhaseUsage]] | None = None,
 ) -> None:
     """Publish a validated FindingsDoc to GitHub.
 
@@ -101,7 +103,9 @@ def publish(
     head_sha = pr_meta["head_sha"]
     run_id = pr_meta.get("run_id", "A")
 
-    body = render_review_body(findings_doc, run_url, run_id, config)
+    body = render_review_body(
+        findings_doc, run_url, run_id, config, phase_usages=phase_usages
+    )
     inline_comments = build_inline_comments(findings_doc.findings, run_url, run_id)
     event = findings_doc.verdict
 
@@ -145,6 +149,7 @@ def render_review_body(
     run_url: str,
     run_id: str,
     config: Config,
+    phase_usages: list[tuple[str, PhaseUsage]] | None = None,
 ) -> str:
     """Render the markdown body. Accepts FindingsDoc (post-W5) or dict
     (legacy callers in tests). Applies redaction to every LLM-emitted
@@ -193,12 +198,45 @@ def render_review_body(
     parts.append(f"**Verdict:** {verdict}.")
     parts.append("")
     parts.append(_commands_footer())
+    cost_line = _cost_footer_line(phase_usages or [])
+    if cost_line is not None:
+        parts.append("")
+        parts.append(cost_line)
     parts.append("")
     parts.append(_attribution_line())
     parts.append("")
     parts.append(f"<!-- momus:run:{run_id} -->")
     parts.append(f"<!-- run: {run_url} -->")
     return "\n".join(parts)
+
+
+def _cost_footer_line(
+    phase_usages: list[tuple[str, PhaseUsage]],
+) -> str | None:
+    """Render `Cost: $X.YZ - I in / O out tokens - model` or None.
+
+    Returns None when there's no usage data to summarize. The cost is
+    rounded to whole cents (two decimals) per spec; sub-cent runs render
+    as `$0.00`. The model name comes from PhaseUsage and is the same
+    across phases under normal operation, so we take it from the first
+    non-empty phase.
+    """
+    if not phase_usages:
+        return None
+    total_cost = sum(u.cost_usd for _, u in phase_usages)
+    total_in = sum(u.input_tokens for _, u in phase_usages)
+    total_out = sum(u.output_tokens for _, u in phase_usages)
+    if total_in == 0 and total_out == 0:
+        return None
+    model = next((u.model for _, u in phase_usages if u.model), "")
+    cents = round(total_cost * 100)
+    dollars = cents // 100
+    rem = cents % 100
+    cost_str = f"${dollars}.{rem:02d}"
+    tokens_str = f"{total_in:,} in / {total_out:,} out tokens"
+    if model:
+        return f"_Cost: {cost_str} - {tokens_str} - {model}_"
+    return f"_Cost: {cost_str} - {tokens_str}_"
 
 
 def _tally_line(tally: dict[str, int]) -> str:

@@ -46,6 +46,15 @@ twenty-plus atomic commits, full implementation plan at
   set, causes the readonly-tools extension to emit one JSON record
   per tool invocation. Used by the corpus harness to assert that no
   forbidden paths or commands were touched.
+- **Per-PR LLM cost in the review footer**: each review now ends
+  with `Cost: $X.YZ ... I in / O out tokens ... model`. The figure
+  is summed from pi-ai's per-turn `usage.cost.total` (which it
+  computes from its bundled per-Mtok pricing table) and rounded to
+  whole cents. The BYO provider registration now pulls the model's
+  real cost from pi-ai's registry by id; previously it hardcoded
+  zero so cost computation produced $0.00 even when tokens flowed.
+  Suppressed entirely when no tokens are observed (e.g. a phase
+  aborted before its first request).
 
 ### Changed
 

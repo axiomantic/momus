@@ -19,7 +19,7 @@ from .config import Config, load_config
 from .fetch_priors import fetch_prior_threads
 from .findings_schema import FindingsDoc
 from .hunks import parse_unified_diff
-from .invoke_pi import invoke_pi_phase_with_retry
+from .invoke_pi import PhaseUsage, invoke_pi_phase_with_retry, summarize_usage
 from .preflight import preflight
 from .prep import prep_inputs
 from .progress import ProgressThrottle, ProgressTracker, estimate_phase_caps
@@ -137,6 +137,10 @@ def _run(
             **status_kwargs,
         )
 
+    # Per-phase usage totals are accumulated below and rendered in the
+    # publish footer so the reviewer can see how much each PR review cost.
+    phase_usages: list[tuple[str, PhaseUsage]] = []
+
     # Phase 1 — classify priors (skip if no prior threads)
     if prior_threads:
         _log(f"Phase 1: classifying {len(prior_threads)} prior threads")
@@ -146,12 +150,13 @@ def _run(
             f"{len(prior_threads)} prior threads"
         )
         _post_progress(phase1_detail, force=True)
-        invoke_pi_phase_with_retry(
+        events = invoke_pi_phase_with_retry(
             "phase1",
             work_dir,
             repo_root,
             on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
         )
+        phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
         prior_findings = _read_outputs_json(outputs_dir / "prior-findings.json", default=[])
     else:
@@ -164,12 +169,13 @@ def _run(
     phase2_detail = f"phase {phase2_index}/{len(phases_to_run)} — reviewing diff"
     tracker.start("phase2")
     _post_progress(phase2_detail, force=True)
-    invoke_pi_phase_with_retry(
+    events = invoke_pi_phase_with_retry(
         "phase2",
         work_dir,
         repo_root,
         on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
     )
+    phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
     findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
@@ -195,12 +201,13 @@ def _run(
         )
         tracker.start("phase3")
         _post_progress(phase3_detail, force=True)
-        invoke_pi_phase_with_retry(
+        events = invoke_pi_phase_with_retry(
             "phase3",
             work_dir,
             repo_root,
             on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
         )
+        phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")
 
     # W5 validation gate: read + validate the FINAL findings.json against
@@ -221,7 +228,14 @@ def _run(
         percent=tracker.percent(),
         **status_kwargs,
     )
-    publish(validated_doc, prior_findings, pr_meta, config, run_url)
+    publish(
+        validated_doc,
+        prior_findings,
+        pr_meta,
+        config,
+        run_url,
+        phase_usages=phase_usages,
+    )
     post_check_run(
         owner=pr_meta["owner"],
         repo=pr_meta["repo"],

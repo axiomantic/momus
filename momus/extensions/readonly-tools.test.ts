@@ -27,6 +27,7 @@ import {
   executeReadRepo,
   executeWriteOutput,
   isDeepSeekViaOpenRouter,
+  lookupModelCost,
   rejectAbsoluteArgv,
   rewriteThinkingSignaturesForDeepSeek,
   validateMomusWorkDir,
@@ -415,6 +416,32 @@ describe("ensureWithinCwd", () => {
     const r = ensureWithinCwd("a.txt", linkedCwd);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.resolved).toBe(join(real, "a.txt"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cost lookup: BYO provider pricing pulled from pi-ai's bundled registry
+// ---------------------------------------------------------------------------
+
+describe("lookupModelCost", () => {
+  test("returns real pricing for a known OpenRouter model", () => {
+    // deepseek/deepseek-v4-pro is the bot's default model and is in
+    // pi-ai's bundled MODELS table under the openrouter provider with
+    // non-zero per-Mtok cost. If this assertion fails after a pi-ai
+    // upgrade, the fix is to re-pin LLM_MODEL or add a fallback price.
+    const cost = lookupModelCost("deepseek/deepseek-v4-pro");
+    expect(cost.input).toBeGreaterThan(0);
+    expect(cost.output).toBeGreaterThan(0);
+  });
+
+  test("returns zeros for an unknown model id", () => {
+    const cost = lookupModelCost("nonexistent-vendor/imaginary-model-9999");
+    expect(cost).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
   });
 });
 

@@ -9,10 +9,72 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PhaseUsage:
+    """Cost + token totals derived from a phase's pi event stream.
+
+    Pi-ai writes `usage.cost.{input,output,cacheRead,cacheWrite,total}` on
+    every assistant message using its bundled per-Mtok pricing table.
+    Momus aggregates the per-turn totals (one `turn_end` event per round
+    trip with the provider) and surfaces the sum in the review footer.
+
+    `cost_usd` is in USD; sub-cent accuracy is preserved here and rounded
+    only at render time. `model` is the configured `LLM_MODEL`, included
+    for the footer line.
+    """
+
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    model: str
+
+
+def summarize_usage(events: Iterable[dict]) -> PhaseUsage:
+    """Sum per-turn cost + token usage from a pi event stream.
+
+    Aggregates `event.message.usage` over `turn_end` events. Each turn
+    corresponds to one provider request, so this gives a faithful total
+    across the phase regardless of how many tool-calling round trips pi
+    performed. `message_end` carries the same usage block; we count
+    `turn_end` only to avoid double-counting.
+
+    Returns zeros when the stream contains no usage data (e.g. phase
+    aborted before any provider call). Callers decide how to render
+    zero-cost cases.
+    """
+    cost = 0.0
+    input_t = 0
+    output_t = 0
+    cached_t = 0
+    model = os.environ.get("LLM_MODEL", "")
+    for ev in events:
+        if ev.get("type") != "turn_end":
+            continue
+        msg = ev.get("message") or {}
+        usage = msg.get("usage") or {}
+        cost_obj = usage.get("cost") or {}
+        # Pi-ai's calculateCost emits .total as the sum of input+output+
+        # cacheRead+cacheWrite costs. Use it directly to avoid drift if
+        # the formula ever changes upstream.
+        cost += float(cost_obj.get("total") or 0)
+        input_t += int(usage.get("input") or 0)
+        output_t += int(usage.get("output") or 0)
+        cached_t += int(usage.get("cacheRead") or 0)
+    return PhaseUsage(
+        cost_usd=cost,
+        input_tokens=input_t,
+        output_tokens=output_t,
+        cached_tokens=cached_t,
+        model=model,
+    )
 
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
 
@@ -394,13 +456,16 @@ def invoke_pi_phase_with_retry(
         "this file. Do NOT respond with prose only; call `write_output` "
         "before ending your turn."
     )
-    events = invoke_pi_phase(
+    retry_events = invoke_pi_phase(
         phase,
         work_dir,
         repo_root,
         extra_prompt_suffix=suffix,
         on_tool_complete=on_tool_complete,
     )
+    # Concatenate both invocations so summarize_usage charges the caller
+    # for tokens consumed on the failed first attempt AND the retry.
+    events = events + retry_events
     if not expected_path.exists():
         raise PiInvocationError(
             f"phase {phase} did not produce expected output {expected_rel} "
