@@ -28,3 +28,6 @@ artifacts/
 # Node / Bun (extension tooling)
 node_modules/
 dist/
+
+# mkdocs build output
+site/
