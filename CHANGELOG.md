@@ -22,8 +22,10 @@ twenty-plus atomic commits, full implementation plan at
   runner.
 - **Default-deny env allowlist**: `momus/invoke_pi.py` now scrubs the
   process environment before spawning pi. Only a fixed set of
-  variables (`HOME`, `PATH`, `LLM_*`, `GITHUB_REPOSITORY`, etc.) is
-  forwarded. The escape hatch `MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2`
+  variables (`HOME`, `PATH`, `TMPDIR`, `LANG`, `LC_*`, `NODE_OPTIONS`,
+  `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`) is forwarded.
+  Anything else, including `GITHUB_TOKEN` and `GITHUB_REPOSITORY`, is
+  scrubbed. The escape hatch `MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2`
   lets users opt extra variables back in.
 - **Pydantic-validated findings.json**: `momus/findings_schema.py`
   declares the wire-format with `extra='forbid'` everywhere and
@@ -77,6 +79,14 @@ twenty-plus atomic commits, full implementation plan at
   {"would_human_block": "...", "rationale": "..."}` to match the
   Pydantic schema (was a string in v1.0.0; the schema was already
   dict-typed but the example was inconsistent).
+- **POSSIBLY BREAKING**: this repo's self-review workflow
+  (`.github/workflows/momus.yml`) is restricted to `pull_request`
+  opened/reopened plus manual `workflow_dispatch`. Previously it
+  also fired on `synchronize` and `/ai-review` comments; both
+  were dropped because every push during a fix cycle queued a
+  fresh review and burned LLM provider quota fast. Consumers of
+  `axiomantic/momus` as a shared action are unaffected: the
+  trigger choice belongs to the caller workflow, see SETUP.md.
 
 ### Fixed
 

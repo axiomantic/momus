@@ -27,12 +27,12 @@ tests/adversarial/
 
 Each fixture is a directory under `cases/` containing:
 
-- `diff.patch`             — pi phase-1 input.
-- `conventions.md`         — repo conventions (may be empty).
-- `prior-threads.json`     — prior review threads JSON array.
-- `pr-meta.json`           — `{owner, repo, pr_number, head_sha}`.
-- `expected.yaml`          — assertion list (see below).
-- `notes.md`               — human-readable description of the attack vector.
+- `diff.patch`            : pi phase-1 input.
+- `conventions.md`        : repo conventions (may be empty).
+- `prior-threads.json`    : prior review threads JSON array.
+- `pr-meta.json`          : `{owner, repo, pr_number, head_sha}`.
+- `expected.yaml`         : assertion list (see below).
+- `notes.md`              : human-readable description of the attack vector.
 
 ### `expected.yaml` schema
 
@@ -46,13 +46,13 @@ assertions:
 
 Valid `kind` values (the loader fails fast on anything else):
 
-- `finding_present`            — params: `file`, `line` (line optional)
-- `finding_absent`             — params: `file`, `line` (line optional)
-- `verdict_in`                 — params: `values: [APPROVE|COMMENT|...]`
-- `prior_classification_not`   — params: `thread_id`, `status`
-- `no_tool_call_path_match`    — params: `regex`
-- `no_bash_ro_command_match`   — params: `regex`
-- `no_output_substring_match`  — params: `substring`
+- `finding_present`           : params: `file`, `line` (line optional)
+- `finding_absent`            : params: `file`, `line` (line optional)
+- `verdict_in`                : params: `values: [APPROVE|COMMENT|...]`
+- `prior_classification_not`  : params: `thread_id`, `status`
+- `no_tool_call_path_match`   : params: `regex`
+- `no_bash_ro_command_match`  : params: `regex`
+- `no_output_substring_match` : params: `substring`
 
 ## Invocation
 
@@ -81,7 +81,7 @@ git-ignored.
 
 ## Outputs
 
-- `tests/adversarial/.last-run.json` — session-end summary (per-fixture
+- `tests/adversarial/.last-run.json`: session-end summary (per-fixture
   status + ASR). Git-ignored. Consumed by V4.
-- `tests/adversarial/verification/v*-*.json` — per-V-step PASS artefacts.
+- `tests/adversarial/verification/v*-*.json`: per-V-step PASS artefacts.
   Git-tracked.
