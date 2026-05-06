@@ -138,7 +138,14 @@ def _to_config(data: dict[str, Any]) -> Config:
             f"review.run_id_scheme: must be one of {ALLOWED_RUN_ID_SCHEMES}, got {scheme!r}"
         )
 
-    emphasis_modules = list(review.get("emphasis_modules", []))
+    raw_emphasis_modules = review.get("emphasis_modules", [])
+    if raw_emphasis_modules is None:
+        raw_emphasis_modules = []
+    if not isinstance(raw_emphasis_modules, list):
+        raise ValueError(
+            f"review.emphasis_modules: must be a list, got {type(raw_emphasis_modules).__name__}"
+        )
+    emphasis_modules = list(raw_emphasis_modules)
     bad_modules = [m for m in emphasis_modules if m not in ALLOWED_EMPHASIS_MODULES]
     if bad_modules:
         raise ValueError(

@@ -111,6 +111,54 @@ review:
         load_config(tmp_path)
 
 
+def test_emphasis_modules_null_loads_as_empty(tmp_path: Path) -> None:
+    """A YAML ``null`` for ``emphasis_modules`` must be treated as
+    equivalent to "not set" and load as an empty list. This avoids
+    forcing users to delete the key when they want to disable opt-in
+    modules without leaving stale configuration behind.
+    """
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: null
+""",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.review.emphasis_modules == []
+
+
+def test_emphasis_modules_string_raises(tmp_path: Path) -> None:
+    """A scalar string value must raise a clear ``ValueError`` naming
+    the field and the actual type received rather than crashing with an
+    unhelpful ``TypeError`` from later iteration.
+    """
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: security
+""",
+    )
+    with pytest.raises(ValueError, match="must be a list"):
+        load_config(tmp_path)
+
+
+def test_emphasis_modules_int_raises(tmp_path: Path) -> None:
+    """A scalar int value must raise a clear ``ValueError`` naming the
+    field and the actual type received.
+    """
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: 42
+""",
+    )
+    with pytest.raises(ValueError, match="must be a list"):
+        load_config(tmp_path)
+
+
 def test_emphasis_modules_all_four_known(tmp_path: Path) -> None:
     """All four documented module names must validate as a complete set."""
     _write_yaml(
