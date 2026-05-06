@@ -3,10 +3,13 @@ name: Docs
 # Versioned mkdocs publishing via `mike`.
 #
 # - Pushes to `main` that touch docs sources publish to the floating
-#   `dev` alias.
+#   `main` alias and re-point the `latest` alias at the main tip. The
+#   default version is also (idempotently) set to `latest` so the site
+#   root redirects to the latest docs.
 # - Tag pushes matching `v*.*.*` (created by release.yml) publish to the
-#   immutable `vX.Y.Z` version, update the major-version `vX` floating
-#   alias, and point `latest` at the new release.
+#   immutable `vX.Y.Z` version and update the major-version `vX`
+#   floating alias. Tags do NOT touch `latest`; `latest` always tracks
+#   main so users land on the freshest docs.
 #
 # Site is served from the `gh-pages` branch. Repo Settings -> Pages must
 # be set to "Deploy from branch", branch `gh-pages`, folder `/`.
@@ -61,9 +64,19 @@ jobs:
       - name: Strict build sanity check
         run: uv run mkdocs build --strict
 
-      - name: Publish dev (main push)
+      - name: Publish main (main push)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-        run: uv run mike deploy --push --update-aliases dev
+        run: |
+          set -euo pipefail
+
+          # Deploy the main-branch docs under the `main` alias and
+          # re-point the `latest` alias at this build so the public
+          # `/latest/` URL always tracks the main branch tip.
+          uv run mike deploy --push --update-aliases main latest
+
+          # Idempotent after the first run; ensures the site root
+          # redirects to `/latest/`.
+          uv run mike set-default --push latest
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -76,8 +89,7 @@ jobs:
           VERSION="${TAG}"
           MAJOR="$(echo "$TAG" | cut -d. -f1)"
 
-          # Publish immutable version + update floating major alias and
-          # `latest`. `mike` rebases gh-pages between deploys, so this is
-          # safe to run sequentially.
-          uv run mike deploy --push --update-aliases "$VERSION" "$MAJOR" latest
-          uv run mike set-default --push latest
+          # Publish the immutable version and update the floating major
+          # alias. `latest` is intentionally NOT updated here; it tracks
+          # main, so tag publishes leave it pointed at main's tip.
+          uv run mike deploy --push --update-aliases "$VERSION" "$MAJOR"
