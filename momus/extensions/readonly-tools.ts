@@ -793,9 +793,20 @@ export type ArgvRejectReason =
  *   - `..` segment (`../../etc/passwd`): walking up out of the cwd via
  *     relative traversal. This was BOT-A2: prior to this, the wrapper
  *     blocked absolute and `~/` but let `..` slip through.
+ *
+ * Windows-style absolute forms (BOT-C2): GitHub Actions runners are POSIX
+ * by deployment design, so `C:\Users\...` and `\\server\share` aren't
+ * dereferenceable to real Windows resources here. They're rejected anyway
+ * for two reasons: defense in depth if someone runs momus on a self-
+ * hosted Windows runner, and consistency: a tool that "blocks absolute
+ * paths" should reject every absolute-path syntax, not only POSIX. The
+ * patterns covered: drive-letter (`C:\`, `c:/`), UNC (`\\server\share`,
+ * `\\?\...`), and single-backslash root (`\Windows\System32`).
+ *
  * `..` is matched as a path SEGMENT (between separators), so legitimate
  * filenames like `a..b.txt` are still accepted. Both `/` and `\` are
- * treated as separators to defend against Windows-style mixed paths.
+ * treated as separators to catch `..` smuggled through Windows-style
+ * mixed paths.
  */
 export function rejectAbsoluteArgv(
   argv: string[],
@@ -805,6 +816,16 @@ export function rejectAbsoluteArgv(
   for (let i = 1; i < argv.length; i++) {
     const tok = argv[i];
     if (tok.startsWith("/")) {
+      return { ok: false, reason: "AbsolutePathArg", offending: tok };
+    }
+    // Windows absolute forms: drive-letter (C:\, c:/), UNC (\\...), and
+    // single-backslash root (\foo). All map to "AbsolutePathArg" since
+    // the same containment intent applies — no escape-via-Windows-syntax.
+    if (
+      /^[A-Za-z]:[\\/]/.test(tok) ||
+      tok.startsWith("\\\\") ||
+      tok.startsWith("\\")
+    ) {
       return { ok: false, reason: "AbsolutePathArg", offending: tok };
     }
     if (tok === "~" || tok.startsWith("~/")) {

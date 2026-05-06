@@ -1013,6 +1013,67 @@ describe("rejectAbsoluteArgv", () => {
     const r = rejectAbsoluteArgv(["cat", "README.md"]);
     expect(r.ok).toBe(true);
   });
+
+  // BOT-C2: Windows-style absolute paths must also be rejected. GHA
+  // runners are POSIX so the symbolic risk is low, but the contract
+  // ("no absolute paths in argv") is broken if we only catch /-prefix
+  // forms. Coverage: drive-letter (C:\, c:/), UNC (\\server\share),
+  // extended-prefix UNC (\\?\C:\), single-backslash root.
+
+  test("bash_ro_rejects_windows_drive_letter_backslash_argv_token", () => {
+    const r = rejectAbsoluteArgv(["cat", "C:\\Windows\\System32"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("AbsolutePathArg");
+      expect(r.offending).toBe("C:\\Windows\\System32");
+    }
+  });
+
+  test("bash_ro_rejects_windows_drive_letter_forward_slash_argv_token", () => {
+    // Mixed-separator form (cygwin/git-bash style) with a Windows drive
+    // letter still presents as absolute.
+    const r = rejectAbsoluteArgv(["cat", "c:/temp/foo.txt"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_unc_path_argv_token", () => {
+    const r = rejectAbsoluteArgv(["cat", "\\\\server\\share\\file"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_extended_prefix_unc_argv_token", () => {
+    // `\\?\C:\foo` — Windows extended-length-path prefix.
+    const r = rejectAbsoluteArgv(["cat", "\\\\?\\C:\\foo"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_single_backslash_root_argv_token", () => {
+    // `\Windows\System32` — Windows current-drive-absolute. Less common
+    // in practice but completes the absolute-path coverage.
+    const r = rejectAbsoluteArgv(["cat", "\\Windows\\System32"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_allows_relative_path_with_embedded_backslash", () => {
+    // `dir\file.txt` is a legitimate POSIX filename that happens to
+    // contain a backslash (the byte is allowed in POSIX names). The
+    // Windows-absolute checks must not trip on backslashes mid-token,
+    // only at token start or in the drive-letter prefix.
+    const r = rejectAbsoluteArgv(["cat", "dir\\file.txt"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_drive_letter_without_separator", () => {
+    // `C:notdrive` — drive-relative on Windows, but on POSIX it's just
+    // a regular filename with a colon. Without a /\\ after the colon,
+    // it isn't an absolute reference, so we accept.
+    const r = rejectAbsoluteArgv(["cat", "C:notdrive"]);
+    expect(r.ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
