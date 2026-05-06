@@ -58,9 +58,11 @@ Built-in `bash`, `write`, `edit` are also excluded via `--tools`.
 ## Environment scoping
 
 The bot runs pi in a process with a **default-deny env allowlist**:
-only a small set of variables (`HOME`, `PATH`, `LLM_*`,
-`GITHUB_REPOSITORY`, etc.) is forwarded to the pi child. Anything else
-on the runner environment is scrubbed before the LLM phases start.
+only a small set of variables (`HOME`, `PATH`, `TMPDIR`, `LANG`,
+`LC_*`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`,
+`LLM_API_KEY`) is forwarded to the pi child. Anything else on the
+runner environment — including `GITHUB_TOKEN` and `GITHUB_REPOSITORY` —
+is scrubbed before the LLM phases start.
 
 If your fork or extension needs a custom env var inside pi, set
 `MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2` on the workflow job. Each name
