@@ -277,7 +277,6 @@ export interface GrepRepoParams {
   pattern: string;
   path?: string;
   "-i"?: boolean;
-  "-n"?: boolean;
 }
 
 /**
@@ -1112,14 +1111,14 @@ export default function (pi: ExtensionAPI) {
     description:
       "Search for a regex pattern under the repo cwd. Absolute and ~/ " +
       "paths are rejected; symlinks escaping cwd are skipped silently. " +
-      "Returns up to 1000 matches.",
+      "Returns up to 1000 matches. Output always includes line numbers " +
+      "in the form 'file:line:text' (no -n toggle).",
     parameters: Type.Object({
       pattern: Type.String({ description: "Regular expression." }),
       path: Type.Optional(
         Type.String({ description: "Relative path under cwd." }),
       ),
       "-i": Type.Optional(Type.Boolean()),
-      "-n": Type.Optional(Type.Boolean()),
     }),
     async execute(_id, params) {
       return executeGrepRepo(params, process.cwd());
