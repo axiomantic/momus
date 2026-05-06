@@ -36,6 +36,9 @@ twenty-plus atomic commits, full implementation plan at
   `redact_for_publish` over every finding before posting. Credential-
   shaped strings (`ghp_`, `sk-`, `AKIA...`) and off-domain image URLs
   are scrubbed. Redaction holds across the GitHub 422-retry branches.
+  Redaction now also covers the `id` and `category` fields on each
+  finding (both LLM-emitted and length-capped but otherwise unrestricted)
+  and the top-level `summary` rendered into the optional Check Run.
 - **Adversarial corpus harness**: `tests/adversarial/` carries six
   attacker-goal fixtures plus a smoke case. Run via
   `pytest -m adversarial` (opt-in by default). Weekly cron at

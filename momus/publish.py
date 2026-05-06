@@ -258,7 +258,8 @@ def _group_by_severity(findings: list[dict[str, Any]]) -> dict[str, list[dict[st
 
 
 def _finding_one_liner(f: dict[str, Any]) -> str:
-    fid = f.get("id", "BOT-?")
+    fid_raw = f.get("id", "BOT-?")
+    fid, _ = redact_for_publish(fid_raw)
     file = f.get("file", "?")
     line = f.get("line", "?")
     title_raw = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
@@ -344,15 +345,19 @@ def build_inline_comments(
 
 
 def _finding_inline_body(f: dict[str, Any], run_url: str, run_id: str) -> str:
-    fid = f.get("id", "BOT-?")
+    fid_raw = f.get("id", "BOT-?")
     sev = f.get("severity", "medium")
-    cat = f.get("category", "quality")
+    cat_raw = f.get("category", "quality")
     title_raw = (f.get("title") or "").strip()
     message_raw = f.get("message", "").strip()
     suggestion_raw = f.get("suggestion")
-    # W5-Redaction: scrub credentials in every LLM-emitted body field at
-    # construction time. Static labels (severity, category, run id, run
-    # URL) are not LLM-controlled and are skipped.
+    # W5-Redaction: scrub credentials in every LLM-emitted field that
+    # reaches the rendered body. Severity is a closed Literal in the
+    # schema; run_id and run_url are workflow-supplied. Everything else
+    # (id, category, title, message, suggestion) is LLM-emitted free
+    # text and goes through redact_for_publish.
+    fid, _ = redact_for_publish(fid_raw)
+    cat, _ = redact_for_publish(cat_raw)
     title, _ = redact_for_publish(title_raw)
     message, _ = redact_for_publish(message_raw)
     suggestion = (
