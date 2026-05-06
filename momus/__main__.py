@@ -147,13 +147,16 @@ def _run(
             f"phase 1/{len(phases_to_run)} — classifying {len(prior_threads)} prior threads"
         )
         _post_progress(phase1_detail, force=True)
+
+        def _on_phase1_tool_complete() -> None:
+            tracker.tick()
+            _post_progress(phase1_detail)
+
         events = invoke_pi_phase_with_retry(
             "phase1",
             work_dir,
             repo_root,
-            on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),  # type: ignore[arg-type,func-returns-value,misc]
-            # mypy: tick()/_post_progress() return None; the tuple wrapper is
-            # an idiomatic two-call lambda. Runtime ignores the return value.
+            on_tool_complete=_on_phase1_tool_complete,
         )
         phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
@@ -168,11 +171,16 @@ def _run(
     phase2_detail = f"phase {phase2_index}/{len(phases_to_run)} — reviewing diff"
     tracker.start("phase2")
     _post_progress(phase2_detail, force=True)
+
+    def _on_phase2_tool_complete() -> None:
+        tracker.tick()
+        _post_progress(phase2_detail)
+
     events = invoke_pi_phase_with_retry(
         "phase2",
         work_dir,
         repo_root,
-        on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),  # type: ignore[arg-type,func-returns-value]
+        on_tool_complete=_on_phase2_tool_complete,
     )
     phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
@@ -196,11 +204,16 @@ def _run(
         phase3_detail = f"phase {len(phases_to_run)}/{len(phases_to_run)} — verifying findings"
         tracker.start("phase3")
         _post_progress(phase3_detail, force=True)
+
+        def _on_phase3_tool_complete() -> None:
+            tracker.tick()
+            _post_progress(phase3_detail)
+
         events = invoke_pi_phase_with_retry(
             "phase3",
             work_dir,
             repo_root,
-            on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),  # type: ignore[arg-type,func-returns-value]
+            on_tool_complete=_on_phase3_tool_complete,
         )
         phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")

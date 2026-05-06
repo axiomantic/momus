@@ -117,6 +117,9 @@ import tripwire
 from momus import publish as publish_mod
 
 def test_publish_posts_review_once():
+    # `doc`, `pr_meta`, `cfg`, and `expected_payload` are assumed to be
+    # fixtures or locals defined elsewhere in the test module — this
+    # snippet shows only the tripwire-relevant scaffolding.
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     gh_api.returns({})  # one queued return per expected call
 
