@@ -7,7 +7,7 @@ name: Momus self-review
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened]
   workflow_dispatch:
     inputs:
       pr_number:
