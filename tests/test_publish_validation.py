@@ -19,8 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
+import tripwire
 from momus import publish as publish_mod
 from momus.config import (
     ChecksConfig,
@@ -32,6 +31,7 @@ from momus.config import (
     VerifyConfig,
 )
 from momus.findings_schema import FindingsDoc
+from pydantic import ValidationError
 
 
 def _minimal_config() -> Config:
@@ -105,27 +105,29 @@ def test_publish_accepts_validated_findings_doc():
     pr_meta = _pr_meta()
     doc = FindingsDoc.model_validate(_valid_findings_dict())
 
-    posted: list[Any] = []
+    # Tripwire conversion: the verdict here is COMMENT, so the
+    # APPROVE-downgrade path that consults `_get_token_user_info` is never
+    # reached. Mocking only `_gh_api` is sufficient — tripwire's strict
+    # interaction ledger surfaces a single POST and would fail loudly if
+    # `publish()` called any other patched seam.
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
 
-    def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-        posted.append((method, endpoint, payload))
-        return {}
-
-    def fake_user_info() -> None:
-        return None
-
-    import unittest.mock as _mock
-
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", fake_user_info
-    ):
+    with tripwire:
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
-    # Exactly one POST to /reviews.
-    assert len(posted) == 1
-    method, endpoint, _payload = posted[0]
-    assert method == "POST"
-    assert endpoint == "/repos/elijahr/lockfreequeues/pulls/25/reviews"
+    # Exactly one POST to /reviews; payload shape is exercised by the
+    # neighboring redaction tests, so accept it as a partial dict here.
+    from dirty_equals import IsDict
+
+    gh_api.assert_call(
+        args=(
+            "POST",
+            "/repos/elijahr/lockfreequeues/pulls/25/reviews",
+            IsDict().settings(partial=True),
+        ),
+        kwargs={},
+    )
 
 
 def test_publish_rejects_malformed_doc_and_does_not_post():
@@ -138,8 +140,6 @@ def test_publish_rejects_malformed_doc_and_does_not_post():
     def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         posted.append((method, endpoint, payload))
         return {}
-
-    import unittest.mock as _mock
 
     with pytest.raises(ValidationError):
         # Validation happens at the boundary (FindingsDoc.model_validate).
@@ -174,9 +174,7 @@ def test_main_read_outputs_json_validates_findings_against_schema(tmp_path):
     assert "findings.json schema validation failed" in str(excinfo.value)
 
 
-def test_main_read_outputs_json_logs_validation_error_with_clear_message(
-    tmp_path, capsys
-):
+def test_main_read_outputs_json_logs_validation_error_with_clear_message(tmp_path, capsys):
     """The validation-failure log line names the file and includes the
     pydantic error so a human reading the action log can tell what failed."""
     from momus.__main__ import FindingsValidationError, _read_findings_doc
@@ -232,8 +230,9 @@ def test_publish_redacts_credential_in_finding_message_before_post():
 
     import unittest.mock as _mock
 
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
+    with (
+        _mock.patch.object(publish_mod, "_gh_api", fake_gh),
+        _mock.patch.object(publish_mod, "_get_token_user_info", lambda: None),
     ):
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -249,7 +248,16 @@ def test_publish_redacts_credential_in_finding_message_before_post():
 
 
 def test_publish_redacts_credential_in_summary_before_post():
-    """A summary containing a credential is redacted in the review body."""
+    """A summary containing a credential is redacted in the review body.
+
+    Tripwire-converted: instead of capturing payloads into a list and
+    grep-asserting after the fact, we use ``tripwire.mock.object`` and
+    ``assert_call`` with a ``dirty_equals`` matcher that demands the
+    redaction marker is present AND the credential is absent in the body
+    field of the single POST. A regression that posted twice, posted with
+    the wrong endpoint, or smuggled the credential past redaction would
+    fail the assertion outright rather than slip through a substring check.
+    """
     cfg = _minimal_config()
     pr_meta = _pr_meta()
     doc_dict = _valid_findings_dict()
@@ -257,23 +265,24 @@ def test_publish_redacts_credential_in_summary_before_post():
     doc_dict["summary"] = f"Leaked PAT in diff: {pat}"
     doc = FindingsDoc.model_validate(doc_dict)
 
-    posted: list[dict[str, Any]] = []
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.returns({})
 
-    def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-        posted.append(payload)
-        return {}
-
-    import unittest.mock as _mock
-
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
-    ):
+    with tripwire:
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
-    assert len(posted) == 1
-    body = posted[0]["body"]
-    assert pat not in body
-    assert "[redacted]" in body
+    from dirty_equals import IsDict, IsStr
+
+    gh_api.assert_call(
+        args=(
+            "POST",
+            "/repos/elijahr/lockfreequeues/pulls/25/reviews",
+            IsDict(
+                body=IsStr(regex=r"(?s).*\[redacted\].*") & ~IsStr(regex=rf"(?s).*{pat}.*"),
+            ).settings(partial=True),
+        ),
+        kwargs={},
+    )
 
 
 def test_publish_redacts_credential_in_finding_title_before_post():
@@ -294,8 +303,9 @@ def test_publish_redacts_credential_in_finding_title_before_post():
 
     import unittest.mock as _mock
 
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
+    with (
+        _mock.patch.object(publish_mod, "_gh_api", fake_gh),
+        _mock.patch.object(publish_mod, "_get_token_user_info", lambda: None),
     ):
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -322,8 +332,9 @@ def test_publish_redacts_credential_in_suggestion_before_post():
 
     import unittest.mock as _mock
 
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
+    with (
+        _mock.patch.object(publish_mod, "_gh_api", fake_gh),
+        _mock.patch.object(publish_mod, "_get_token_user_info", lambda: None),
     ):
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -337,9 +348,7 @@ def test_publish_strips_off_domain_image_before_post():
     cfg = _minimal_config()
     pr_meta = _pr_meta()
     doc_dict = _valid_findings_dict()
-    doc_dict["summary"] = (
-        "Looks fine. ![pixel](https://evil.example/track.png) Done."
-    )
+    doc_dict["summary"] = "Looks fine. ![pixel](https://evil.example/track.png) Done."
     doc = FindingsDoc.model_validate(doc_dict)
 
     posted: list[dict[str, Any]] = []
@@ -350,8 +359,9 @@ def test_publish_strips_off_domain_image_before_post():
 
     import unittest.mock as _mock
 
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
+    with (
+        _mock.patch.object(publish_mod, "_gh_api", fake_gh),
+        _mock.patch.object(publish_mod, "_get_token_user_info", lambda: None),
     ):
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 
@@ -378,8 +388,9 @@ def test_publish_redacts_credential_in_noteworthy_before_post():
 
     import unittest.mock as _mock
 
-    with _mock.patch.object(publish_mod, "_gh_api", fake_gh), _mock.patch.object(
-        publish_mod, "_get_token_user_info", lambda: None
+    with (
+        _mock.patch.object(publish_mod, "_gh_api", fake_gh),
+        _mock.patch.object(publish_mod, "_get_token_user_info", lambda: None),
     ):
         publish_mod.publish(doc, [], pr_meta, cfg, run_url="https://run/1")
 

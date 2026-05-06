@@ -35,7 +35,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
+import tripwire
 from momus import publish as publish_mod
 from momus.publish import (
     _APP_CANNOT_APPROVE_REASON,
@@ -46,7 +46,7 @@ from momus.publish import (
 
 
 @pytest.fixture
-def _ghp_finding_body() -> str:
+def ghp_finding_body() -> str:
     """A pre-rendered inline-comment body where any credential has already
     been replaced with `[redacted]` (per W5-PublishWiring's construction-
     time redaction). This is the SHAPE the retry branches must preserve.
@@ -60,68 +60,93 @@ def _ghp_finding_body() -> str:
 
 
 def test_approve_downgrade_retry_preserves_redaction(
-    _ghp_finding_body: str, monkeypatch: pytest.MonkeyPatch
+    ghp_finding_body: str,
 ) -> None:
     """When the first POST 422s with the App-cannot-approve signal,
     the retry POST must carry the SAME redacted body + inline comments.
     A future refactor that re-builds payloads from raw input would break
     this test.
+
+    Tripwire-converted: ``.raises(...).returns(...)`` queues the two
+    expected gh_api outcomes in order, and ``assert_call`` x2 pins both
+    POST payload shapes (event, body, comments) to exact values. This is
+    stricter than the original ``len(calls) == 2`` + substring asserts:
+    a refactor that swapped call order, posted three times, or mutated
+    the inline-comment list would fail the timeline check immediately.
     """
-    calls: list[dict[str, Any]] = []
-
-    def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
-        calls.append(payload)
-        if len(calls) == 1:
-            raise _GhApiError(
-                422,
-                "GitHub Apps must use one of the events `COMMENT` or `REQUEST_CHANGES`",
-            )
-        return {}
-
-    monkeypatch.setattr(publish_mod, "_gh_api", fake_gh)
-
     pre_redacted_body = "summary [redacted] in commit"
     inline = [
         {
             "path": "f.py",
             "line": 1,
             "side": "RIGHT",
-            "body": _ghp_finding_body,
+            "body": ghp_finding_body,
         }
     ]
-    _submit_review(
-        owner="o",
-        repo="r",
-        pr_number=1,
-        head_sha="abc",
-        body=pre_redacted_body,
-        inline_comments=inline,
-        event="APPROVE",
-    )
 
-    # Two POSTs total: original APPROVE then the downgraded COMMENT retry.
-    assert len(calls) == 2
+    err = _GhApiError(
+        422,
+        "GitHub Apps must use one of the events `COMMENT` or `REQUEST_CHANGES`",
+    )
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.raises(err).returns({})
+
+    with tripwire:
+        _submit_review(
+            owner="o",
+            repo="r",
+            pr_number=1,
+            head_sha="abc",
+            body=pre_redacted_body,
+            inline_comments=inline,
+            event="APPROVE",
+        )
+
+    from dirty_equals import IsInstance
+
     # First call: original APPROVE shape with the redacted strings.
-    assert calls[0]["event"] == "APPROVE"
-    assert calls[0]["body"] == pre_redacted_body
-    assert "ghp_" not in calls[0]["body"]
-    # Retry: downgrade note prepended; redacted strings preserved.
-    retry = calls[1]
-    assert retry["event"] == "COMMENT"
-    assert "ghp_" not in retry["body"]
-    # The static downgrade note has been prepended to the (still
-    # redacted) body.
-    assert _APP_CANNOT_APPROVE_REASON in retry["body"]
-    assert pre_redacted_body in retry["body"]
-    # Inline comments are preserved on this retry path.
-    assert retry["comments"] == inline
-    retry_inline_body = retry["comments"][0]["body"]
-    assert "[redacted]" in retry_inline_body
-    assert "ghp_" not in retry_inline_body
+    gh_api.assert_call(
+        args=(
+            "POST",
+            "/repos/o/r/pulls/1/reviews",
+            {
+                "commit_id": "abc",
+                "body": pre_redacted_body,
+                "event": "APPROVE",
+                "comments": inline,
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(_GhApiError),
+    )
+    # Retry: downgrade note prepended; redacted body and inline list
+    # preserved verbatim.
+    expected_retry_body = (
+        f"_Note: verdict was APPROVE but downgraded to COMMENT because "
+        f"{_APP_CANNOT_APPROVE_REASON}._\n\n{pre_redacted_body}"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            "/repos/o/r/pulls/1/reviews",
+            {
+                "commit_id": "abc",
+                "body": expected_retry_body,
+                "event": "COMMENT",
+                "comments": inline,
+            },
+        ),
+        kwargs={},
+    )
+    # Inline-comment body still carries the redaction marker (sanity-
+    # checked via a direct string assertion to defend against a future
+    # change that introduces a different "redacted" sentinel).
+    assert "[redacted]" in inline[0]["body"]
+    assert "ghp_" not in inline[0]["body"]
 
 
 def test_off_hunk_demote_retry_preserves_redaction(
-    _ghp_finding_body: str, monkeypatch: pytest.MonkeyPatch
+    ghp_finding_body: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When 422 hits a non-self-approval, non-app-cannot-approve cause and
     inline_comments is non-empty, `_submit_review` strips inline comments
@@ -147,7 +172,7 @@ def test_off_hunk_demote_retry_preserves_redaction(
             "path": "f.py",
             "line": 1,
             "side": "RIGHT",
-            "body": _ghp_finding_body,
+            "body": ghp_finding_body,
         }
     ]
     _submit_review(
@@ -255,9 +280,7 @@ def test_calibration_field_redacted_through_full_publish(
     def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
         calls.append(payload)
         if len(calls) == 1 and "/reviews" in endpoint:
-            raise _GhApiError(
-                422, "Pull request review thread line must be part of the diff"
-            )
+            raise _GhApiError(422, "Pull request review thread line must be part of the diff")
         return {}
 
     monkeypatch.setattr(publish_mod, "_gh_api", fake_gh)
@@ -289,6 +312,5 @@ def test_retry_static_helpers_emit_no_attacker_content() -> None:
     assert "static reason" in out
     # The static reason constant is exactly the documented English string.
     assert _APP_CANNOT_APPROVE_REASON == (
-        "the default GITHUB_TOKEN cannot approve PRs "
-        "(configure a GitHub App; see SETUP.md)"
+        "the default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; see SETUP.md)"
     )
