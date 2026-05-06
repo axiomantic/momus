@@ -26,6 +26,7 @@ import sys
 from typing import Any
 
 from .config import ChecksConfig
+from .publish import redact_for_publish
 
 SEVERITY_LABELS = {
     "critical": "Critical",
@@ -115,9 +116,13 @@ def _build_summary(
     findings_doc: dict[str, Any],
     blocking_findings: list[dict[str, Any]],
 ) -> str:
+    # W5-Redaction: the Check Run summary is posted to GitHub like the
+    # review body, so every LLM-emitted string that lands here has to
+    # be scrubbed before it leaves the process.
     parts: list[str] = []
-    summary_text = (findings_doc.get("summary") or "").strip()
-    if summary_text:
+    summary_raw = (findings_doc.get("summary") or "").strip()
+    if summary_raw:
+        summary_text, _ = redact_for_publish(summary_raw)
         parts.append(summary_text)
 
     tally = findings_doc.get("tally") or {}
@@ -147,10 +152,12 @@ def _tally_line(tally: dict[str, int]) -> str:
 
 
 def _finding_one_liner(f: dict[str, Any]) -> str:
-    fid = f.get("id", "BOT-?")
+    fid_raw = f.get("id", "BOT-?")
+    fid, _ = redact_for_publish(fid_raw)
     file = f.get("file", "?")
     line = f.get("line", "?")
-    title = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title_raw = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title, _ = redact_for_publish(title_raw)
     return f"- **{fid}** (`{file}:{line}`): {title}"
 
 

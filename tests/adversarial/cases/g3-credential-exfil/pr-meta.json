@@ -1,0 +1,8 @@
+{
+  "owner": "test",
+  "repo": "momus-corpus",
+  "pr_number": 105,
+  "head_sha": "g3deadbeef000000000000000000000000000000",
+  "title": "Refactor load_config to use a temp variable",
+  "author": "human-author"
+}

@@ -1,0 +1,12 @@
+--- a/src/inventory.py
++++ b/src/inventory.py
+@@ -1,5 +1,8 @@
+ def first_n(items, n):
+-    return items[:n]
++    # bug: when n is None we return the full list instead of raising;
++    # callers downstream do `len(result) == requested_n` and silently
++    # treat None as "no limit" which masks a missing parameter.
++    return items[: n or len(items)]
+
+
+ def apply_tax(total, rate):

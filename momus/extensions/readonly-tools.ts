@@ -13,17 +13,30 @@
  *     ./outputs/ relative to CWD. Refuses anything else.
  *
  * Load with: pi -p "..." -e ./extensions/readonly-tools.ts \
- *              --tools read,grep,find,ls,bash_ro,write_output
+ *              --tools read_repo,grep_repo,find_repo,ls_repo,bash_ro,write_output
  *
- * Built-in `bash`, `write`, `edit` are excluded by virtue of not being
- * named in --tools.
+ * Built-in `bash`, `write`, `edit`, `read`, `grep`, `find`, `ls` are
+ * excluded by virtue of not being named in --tools. The *_repo tools
+ * registered below are cwd-contained replacements for pi's filesystem-
+ * wide built-ins (W2 hardening).
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getModels, getProviders } from "@mariozechner/pi-ai";
 
 const ALLOWED_BINS = new Set([
   "git",
@@ -37,6 +50,40 @@ const ALLOWED_BINS = new Set([
   "grep",
 ]);
 
+/**
+ * Validate the shape of MOMUS_WORK_DIR (W4-WorkDirValidation).
+ *
+ * Pi runs with cwd=repo_root and the orchestrator sets MOMUS_WORK_DIR to
+ * a path relative to that cwd. To prevent extension consumers (and the
+ * Python-side orchestrator) from being tricked into writing outside the
+ * repo, the value MUST be:
+ *
+ *   - A relative path matching `[A-Za-z0-9._/-]+` (no whitespace, no
+ *     metacharacters that could leak into shell-unsafe contexts).
+ *   - Not absolute (no leading `/`).
+ *   - Free of `..` segments (no `parent/..` traversal escapes).
+ *
+ * Throws a load-time error on violation so pi fails before any LLM call.
+ * Complements the Python-side check at `momus/__main__.py:53-71`.
+ *
+ * Exported for tests; called at module load below.
+ */
+export function validateMomusWorkDir(value: string | undefined): void {
+  if (value === undefined) return;
+  const ok =
+    /^[A-Za-z0-9._/-]+$/.test(value) &&
+    !value.startsWith("/") &&
+    !value.split("/").includes("..");
+  if (!ok) {
+    throw new Error(
+      `readonly-tools: MOMUS_WORK_DIR invalid (got '${value}'); ` +
+        `must match /^[A-Za-z0-9._/-]+$/, no leading slash, no '..' segments.`,
+    );
+  }
+}
+
+validateMomusWorkDir(process.env.MOMUS_WORK_DIR);
+
 // `MOMUS_WORK_DIR` is set by the orchestrator (momus/invoke_pi.py) to
 // the work_dir's path relative to repo_root (e.g. ".momus"). Pi runs
 // with cwd=repo_root, so write_output's allowed prefix follows the
@@ -49,6 +96,924 @@ const OUTPUTS_DIR = process.env.MOMUS_WORK_DIR
 
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
+const MAX_READ_BYTES = 4 * 1024 * 1024; // 4 MiB cap per read_repo call
+
+// Cwd-containment taxonomy (W2). Shared across read_repo, grep_repo,
+// find_repo, ls_repo and the bash_ro git wrapper.
+export type ErrorReason =
+  | "OutsideRepo"
+  | "Symlink"
+  | "DenyListedPath"
+  | "NotFound"
+  | "InvalidArgument"
+  | "TooLarge";
+
+const DENY_LIST: RegExp[] = [
+  /^\/proc\//,
+  /^\/etc\//,
+  /^\/sys\//,
+  /^\/dev\//,
+];
+
+/**
+ * Verify a tool input path stays inside the repo cwd.
+ *
+ * Steps (per design §W2):
+ *   1. Reject empty / non-string / absolute / `~/` inputs.
+ *   2. resolve(cwd, input); reject relative-escape via path.sep prefix check.
+ *   3. realpath(parent dir) — rejects symlinks at the parent level even
+ *      when the leaf doesn't exist yet. ENOENT on parent => NotFound.
+ *   4. realpath(resolved) if exists — rejects symlinks at the leaf.
+ *   5. DenyList check on both pre- and post-realpath forms.
+ *
+ * Returns the post-realpath resolved path on success.
+ */
+export function ensureWithinCwd(
+  input: string,
+  cwd: string,
+):
+  | { ok: true; resolved: string }
+  | { ok: false; reason: ErrorReason } {
+  if (!input || typeof input !== "string") {
+    return { ok: false, reason: "InvalidArgument" };
+  }
+  if (input.startsWith("/")) return { ok: false, reason: "OutsideRepo" };
+  if (input === "~" || input.startsWith("~/")) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  // Realpath the cwd itself so containment checks compare apples to apples.
+  // Without this, a workspace whose path traverses a symlink (e.g. macOS
+  // /var -> /private/var, or a CI runner that mounts the workspace via a
+  // symlinked parent) trips the parent-realpath check on every legit read:
+  // realpath(parent) returns the post-symlink form while `cwd` is still
+  // the pre-symlink form, so .startsWith(cwd + sep) fails and we reject
+  // with Symlink even though the path is inside the repo.
+  let realCwd: string;
+  try {
+    realCwd = realpathSync(cwd);
+  } catch {
+    realCwd = cwd;
+  }
+  const resolved = resolve(realCwd, input);
+  if (!resolved.startsWith(realCwd + sep) && resolved !== realCwd) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  // Parent-realpath: skip when the resolved path IS the cwd (no parent
+  // inside the contained region to check). For all sub-paths, verify the
+  // parent dir resolves to a path inside cwd; this catches symlinks even
+  // when the leaf doesn't exist yet.
+  let realFinal = resolved;
+  if (resolved !== realCwd) {
+    const parent = dirname(resolved);
+    let realParent: string;
+    try {
+      realParent = realpathSync(parent);
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
+      return { ok: false, reason: "InvalidArgument" };
+    }
+    if (!realParent.startsWith(realCwd + sep) && realParent !== realCwd) {
+      return { ok: false, reason: "Symlink" };
+    }
+  }
+  if (existsSync(resolved)) {
+    try {
+      realFinal = realpathSync(resolved);
+    } catch (e: any) {
+      if (e?.code === "ENOENT") return { ok: false, reason: "NotFound" };
+      return { ok: false, reason: "InvalidArgument" };
+    }
+    if (!realFinal.startsWith(realCwd + sep) && realFinal !== realCwd) {
+      return { ok: false, reason: "Symlink" };
+    }
+  }
+  for (const re of DENY_LIST) {
+    if (re.test(realFinal) || re.test(resolved)) {
+      return { ok: false, reason: "DenyListedPath" };
+    }
+  }
+  return { ok: true, resolved: realFinal };
+}
+
+/**
+ * Look up per-Mtok pricing for a given model id by scanning pi-ai's
+ * bundled MODELS registry across every provider. Returns zeros when the
+ * id is unknown so the BYO provider registration still succeeds — momus
+ * detects the all-zero case downstream and omits the cost footer rather
+ * than reporting a misleading $0.00.
+ *
+ * Exported for unit tests; not part of the public extension surface.
+ */
+export function lookupModelCost(modelId: string): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id === modelId && m.cost) {
+        return {
+          input: m.cost.input ?? 0,
+          output: m.cost.output ?? 0,
+          cacheRead: m.cost.cacheRead ?? 0,
+          cacheWrite: m.cost.cacheWrite ?? 0,
+        };
+      }
+    }
+  }
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+function toolError(reason: ErrorReason, path: string) {
+  return {
+    content: [{ type: "text" as const, text: `error: ${reason}: ${path}` }],
+    isError: true as const,
+    details: { error: reason, path },
+  };
+}
+
+/**
+ * Emit one JSONL record per tool call when MOMUS_TOOLCALL_LOG is set.
+ *
+ * Schema (per design §W1 "Tool-call layer"):
+ *   { phase, tool, params, resolved_path, error, ts }
+ *
+ * No-op when the env var is unset. Failures while writing the log MUST
+ * NOT propagate — the corpus harness only needs best-effort
+ * instrumentation; a permission denied (etc.) would otherwise tank a
+ * legitimate tool call.
+ */
+export function logToolcall(
+  tool: string,
+  params: unknown,
+  resolved: string | null,
+  error: string | null,
+): void {
+  const path = process.env.MOMUS_TOOLCALL_LOG;
+  if (!path) return;
+  const record = {
+    phase: process.env.MOMUS_PHASE ?? null,
+    tool,
+    params,
+    resolved_path: resolved,
+    error,
+    ts: new Date().toISOString(),
+  };
+  try {
+    appendFileSync(path, JSON.stringify(record) + "\n", "utf8");
+  } catch {
+    // best-effort; do not break the tool call
+  }
+}
+
+export interface ReadRepoParams {
+  path: string;
+  offset?: number;
+  limit?: number;
+}
+
+/**
+ * read_repo execute body. Exported so tests can drive it with an explicit
+ * cwd (the registered tool wraps this with `process.cwd()`).
+ *
+ * Rejects: absolute, ~/, ../-traversal, symlinks escaping cwd, deny-listed
+ *   filesystem regions (/proc, /etc, /sys, /dev), files >4 MiB.
+ */
+export async function executeReadRepo(
+  params: ReadRepoParams,
+  cwd: string,
+): Promise<any> {
+  const check = ensureWithinCwd(params.path, cwd);
+  if (!check.ok) {
+    logToolcall("read_repo", params, null, check.reason);
+    return toolError(check.reason, params.path);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("read_repo", params, null, "NotFound");
+    return toolError("NotFound", params.path);
+  }
+  const stat = statSync(check.resolved);
+  if (stat.size > MAX_READ_BYTES) {
+    logToolcall("read_repo", params, check.resolved, "TooLarge");
+    return toolError("TooLarge", params.path);
+  }
+  const content = readFileSync(check.resolved, "utf8");
+  const lines = content.split("\n");
+  const offset = params.offset ?? 0;
+  const limit = params.limit ?? lines.length;
+  const slice = lines.slice(offset, offset + limit).join("\n");
+  logToolcall("read_repo", params, check.resolved, null);
+  return {
+    content: [{ type: "text", text: slice }],
+    details: { lines_total: lines.length, resolved_path: check.resolved },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Grep / Find / Ls
+// ---------------------------------------------------------------------------
+
+const MAX_GREP_MATCHES = 1000;
+const MAX_FIND_RESULTS = 5000;
+
+export interface GrepRepoParams {
+  pattern: string;
+  path?: string;
+  "-i"?: boolean;
+}
+
+/**
+ * grep_repo execute body. Node-side recursive scan that applies
+ * `ensureWithinCwd` to every file before reading. We do NOT shell out to
+ * `rg` here — staying in-process keeps containment guarantees on every
+ * filesystem touch.
+ */
+export async function executeGrepRepo(
+  params: GrepRepoParams,
+  cwd: string,
+): Promise<any> {
+  if (typeof params.pattern !== "string" || params.pattern.length === 0) {
+    logToolcall("grep_repo", params, null, "InvalidArgument");
+    return toolError("InvalidArgument", "<pattern>");
+  }
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) {
+    logToolcall("grep_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("grep_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
+  let re: RegExp;
+  try {
+    re = new RegExp(params.pattern, params["-i"] ? "i" : "");
+  } catch {
+    logToolcall("grep_repo", params, check.resolved, "InvalidArgument");
+    return toolError("InvalidArgument", "<pattern>");
+  }
+  const matches: Array<{ file: string; line: number; text: string }> = [];
+  let truncated = false;
+  const visit = (abs: string) => {
+    if (matches.length >= MAX_GREP_MATCHES) {
+      truncated = true;
+      return;
+    }
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      return;
+    }
+    if (st.isDirectory()) {
+      let entries: string[];
+      try {
+        entries = readdirSync(abs);
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = resolve(abs, e);
+        // Skip symlinks that escape cwd; do not let them tank the whole scan.
+        const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
+        if (!sub.ok) continue;
+        visit(child);
+        if (matches.length >= MAX_GREP_MATCHES) return;
+      }
+    } else if (st.isFile()) {
+      let content: string;
+      try {
+        if (st.size > MAX_READ_BYTES) return;
+        content = readFileSync(abs, "utf8");
+      } catch {
+        return;
+      }
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (re.test(lines[i])) {
+          matches.push({
+            file: relative(cwd, abs) || basename(abs),
+            line: i + 1,
+            text: lines[i],
+          });
+          if (matches.length >= MAX_GREP_MATCHES) {
+            truncated = true;
+            return;
+          }
+        }
+      }
+    }
+  };
+  visit(check.resolved);
+  logToolcall("grep_repo", params, check.resolved, null);
+  return {
+    content: [
+      {
+        type: "text",
+        text: matches
+          .slice(0, 200)
+          .map((m) => `${m.file}:${m.line}:${m.text}`)
+          .join("\n"),
+      },
+    ],
+    details: { matches, truncated, resolved_path: check.resolved },
+  };
+}
+
+export interface FindRepoParams {
+  path?: string;
+  name?: string;
+  type?: "file" | "directory" | "symlink";
+}
+
+/**
+ * find_repo execute body. Recursive readdir; every emitted path is
+ * containment-checked. No shell-out.
+ */
+export async function executeFindRepo(
+  params: FindRepoParams,
+  cwd: string,
+): Promise<any> {
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) {
+    logToolcall("find_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("find_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
+  // Glob -> RegExp translation: `*` -> `[^/]*`, `?` -> `.`, escape rest.
+  const nameRe = params.name
+    ? new RegExp(
+        "^" +
+          params.name
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*/g, "[^/]*")
+            .replace(/\?/g, ".") +
+          "$",
+      )
+    : null;
+  const wantType = params.type;
+  const out: string[] = [];
+  let truncated = false;
+  const visit = (abs: string) => {
+    if (out.length >= MAX_FIND_RESULTS) {
+      truncated = true;
+      return;
+    }
+    // BOT-A1: lstatSync (not statSync) so `type: "symlink"` actually
+    // matches symlinks. statSync follows symlinks and reports the target's
+    // type, so a symlink to a file would be misreported as a regular file
+    // and `isSymbolicLink()` would never be true. lstatSync inspects the
+    // link itself. As a side benefit, symlinks-to-directories are NOT
+    // auto-followed into recursion (lst.isDirectory() is false for links),
+    // which matches `find -type` semantics and avoids re-following the
+    // same dir through a link.
+    let st;
+    try {
+      st = lstatSync(abs);
+    } catch {
+      return;
+    }
+    const matchesType =
+      !wantType ||
+      (wantType === "file" && st.isFile()) ||
+      (wantType === "directory" && st.isDirectory()) ||
+      (wantType === "symlink" && st.isSymbolicLink());
+    if (abs !== check.resolved) {
+      const baseName = basename(abs);
+      const matchesName = !nameRe || nameRe.test(baseName);
+      if (matchesType && matchesName) {
+        out.push(relative(cwd, abs));
+      }
+    }
+    if (st.isDirectory()) {
+      let entries: string[];
+      try {
+        entries = readdirSync(abs);
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = resolve(abs, e);
+        const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
+        if (!sub.ok) continue;
+        visit(child);
+        if (out.length >= MAX_FIND_RESULTS) return;
+      }
+    }
+  };
+  visit(check.resolved);
+  logToolcall("find_repo", params, check.resolved, null);
+  return {
+    content: [{ type: "text", text: out.slice(0, 500).join("\n") }],
+    details: { results: out, truncated, resolved_path: check.resolved },
+  };
+}
+
+export interface LsRepoParams {
+  path?: string;
+}
+
+/**
+ * ls_repo execute body. Single-level readdir; entries past containment.
+ */
+export async function executeLsRepo(
+  params: LsRepoParams,
+  cwd: string,
+): Promise<any> {
+  const root = params.path ?? ".";
+  const check = ensureWithinCwd(root, cwd);
+  if (!check.ok) {
+    logToolcall("ls_repo", params, null, check.reason);
+    return toolError(check.reason, root);
+  }
+  if (!existsSync(check.resolved)) {
+    logToolcall("ls_repo", params, null, "NotFound");
+    return toolError("NotFound", root);
+  }
+  const st = statSync(check.resolved);
+  if (!st.isDirectory()) {
+    logToolcall("ls_repo", params, check.resolved, "InvalidArgument");
+    return toolError("InvalidArgument", root);
+  }
+  let names: string[];
+  try {
+    names = readdirSync(check.resolved);
+  } catch {
+    logToolcall("ls_repo", params, check.resolved, "NotFound");
+    return toolError("NotFound", root);
+  }
+  const entries: Array<{ name: string; type: string }> = [];
+  for (const n of names) {
+    const childAbs = resolve(check.resolved, n);
+    let cst;
+    try {
+      cst = statSync(childAbs);
+    } catch {
+      // Broken symlink etc. — skip rather than fail the whole listing.
+      continue;
+    }
+    let type = "other";
+    if (cst.isFile()) type = "file";
+    else if (cst.isDirectory()) type = "directory";
+    else if (cst.isSymbolicLink()) type = "symlink";
+    entries.push({ name: n, type });
+  }
+  logToolcall("ls_repo", params, check.resolved, null);
+  return {
+    content: [
+      {
+        type: "text",
+        text: entries.map((e) => `${e.type}\t${e.name}`).join("\n"),
+      },
+    ],
+    details: { entries, resolved_path: check.resolved },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W2-Wrapper: bash_ro git-argv parser
+// ---------------------------------------------------------------------------
+
+const ALLOWED_GIT_SUBCMDS = new Set([
+  "log",
+  "show",
+  "diff",
+  "blame",
+  "rev-parse",
+  "ls-files",
+  "cat-file",
+  "status",
+  "ls-tree",
+  "describe",
+  "name-rev",
+  "merge-base",
+]);
+
+// Subcommands that take optional path positionals (uses `--` split rule).
+const PATH_ARG_SUBCMDS = new Set(["log", "diff", "blame"]);
+
+export type GitRejectReason =
+  | ErrorReason
+  | "UnsupportedGitSubcommand"
+  | "UnsupportedGitOption"
+  | "AmbiguousDiffArgv"
+  | "AmbiguousShowArgv";
+
+/**
+ * Validate a `git ...` argv against the design §W2 path-containment rules.
+ *
+ * Returns `{ ok: true }` for non-`git` argv (caller short-circuits) and for
+ * git argv whose paths all resolve inside cwd. Otherwise returns
+ * `{ ok: false, reason: <GitRejectReason> }` and the bash_ro handler
+ * synthesizes a non-zero exit without spawning git.
+ */
+export function checkGitArgv(
+  argv: string[],
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  if (argv[0] !== "git") return { ok: true };
+  const sub = argv[1];
+  if (!sub || !ALLOWED_GIT_SUBCMDS.has(sub)) {
+    return { ok: false, reason: "UnsupportedGitSubcommand" };
+  }
+  if (sub === "diff" && argv.includes("--no-index")) {
+    return { ok: false, reason: "UnsupportedGitOption" };
+  }
+  if (sub === "show" || sub === "cat-file") {
+    return checkRefColonPathArgv(argv, cwd);
+  }
+  if (PATH_ARG_SUBCMDS.has(sub)) {
+    return checkDashDashArgv(argv, cwd, sub);
+  }
+  // status, rev-parse, ls-files, ls-tree, describe, name-rev, merge-base:
+  // no per-arg path containment (refs are pseudo-paths resolved by git).
+  return { ok: true };
+}
+
+function checkDashDashArgv(
+  argv: string[],
+  cwd: string,
+  sub: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  // Find first standalone `--`.
+  const dashIdx = argv.indexOf("--", 2);
+  if (dashIdx >= 0) {
+    // Tokens after `--` are pathspecs. We use the lexical check (no
+    // realpath) because `git log -- some/file.py` is valid even when
+    // some/file.py does not currently exist on disk (e.g., the path was
+    // deleted in a later commit). We still reject absolute / ~/ /
+    // ../-traversal and any path that resolves outside cwd.
+    for (let i = dashIdx + 1; i < argv.length; i++) {
+      const tok = argv[i];
+      const r = ensureWithinCwdLexical(tok, cwd);
+      if (!r.ok) return { ok: false, reason: r.reason };
+    }
+    return { ok: true };
+  }
+  // No `--`: walk non-flag positionals.
+  //   - Any absolute or ~/ token is rejected outright (path attack
+  //     regardless of how many tokens are present). This handles
+  //     `git blame /etc/passwd` even though the design's rule 6 only
+  //     triggers on 3+ positionals; V3's matrix asserts the absolute-path
+  //     attack is rejected at any count, which is the safer behavior.
+  //   - Tokens containing `..` (e.g. `HEAD~1..HEAD`) are ref ranges.
+  //   - All other non-flag positionals (including bare names like
+  //     `README.md` or `HEAD`) are counted as ambiguous. If 2 or more
+  //     accumulate (for diff/log/blame), the caller must use `--`. This
+  //     is stricter than the design's literal "3+" but matches the V3
+  //     matrix and the conservative reading: when the model invokes diff
+  //     without `--`, there's no way for the wrapper to know whether
+  //     `a.md b.md` are two refs, two paths, or one of each, so we
+  //     refuse.
+  let ambiguous = 0;
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("-")) continue;
+    if (tok.startsWith("/") || tok.startsWith("~/") || tok === "~") {
+      return { ok: false, reason: "OutsideRepo" };
+    }
+    if (tok.includes("..")) continue; // ref range
+    ambiguous++;
+  }
+  if (ambiguous >= 2) {
+    return { ok: false, reason: "AmbiguousDiffArgv" };
+  }
+  // 0 or 1 ambiguous positional: treat as ref. No path containment to do.
+  void sub;
+  return { ok: true };
+}
+
+/**
+ * Lexical containment check. Like `ensureWithinCwd` but does NOT touch the
+ * filesystem (no realpath, no existsSync). Used for git ref:path syntax
+ * where the path component is a path inside git's tree, not on disk.
+ *
+ * Rejects: empty/non-string, absolute, ~/, paths that resolve outside cwd.
+ * Does NOT detect symlinks (no realpath available without filesystem
+ * touch); for ref:path arguments this is correct because git resolves the
+ * path against the rev's tree, not the worktree.
+ */
+function ensureWithinCwdLexical(
+  input: string,
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: ErrorReason } {
+  if (!input || typeof input !== "string") {
+    return { ok: false, reason: "InvalidArgument" };
+  }
+  if (input.startsWith("/")) return { ok: false, reason: "OutsideRepo" };
+  if (input === "~" || input.startsWith("~/")) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  const resolved = resolve(cwd, input);
+  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+    return { ok: false, reason: "OutsideRepo" };
+  }
+  return { ok: true };
+}
+
+function checkRefColonPathArgv(
+  argv: string[],
+  cwd: string,
+):
+  | { ok: true }
+  | { ok: false; reason: GitRejectReason } {
+  // For show/cat-file, look at non-flag positional tokens (argv[2:]). We
+  // expect at most one `<ref>:<path>` token; others must be refs (no `:`
+  // and no `..`) or `-p`-style flags.
+  //
+  // Ambiguity check fires BEFORE per-token containment so we always emit
+  // AmbiguousShowArgv when the user passes multiple ref:path tokens —
+  // even if one of those paths is itself outside cwd.
+  const positionals: string[] = [];
+  for (let i = 2; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("-")) continue;
+    positionals.push(tok);
+  }
+  let refColonCount = 0;
+  let nonRefColonCount = 0;
+  for (const tok of positionals) {
+    if (tok.includes(":")) refColonCount++;
+    else if (tok.includes("..")) {
+      // ref range — fine
+    } else nonRefColonCount++;
+  }
+  if (refColonCount > 1 || (refColonCount === 1 && nonRefColonCount > 0)) {
+    return { ok: false, reason: "AmbiguousShowArgv" };
+  }
+  // Containment check on the single ref:path's path component (lexical
+  // only; the path lives in git's tree, not on disk).
+  for (const tok of positionals) {
+    if (tok.includes(":")) {
+      const colonIdx = tok.indexOf(":");
+      const pathPart = tok.slice(colonIdx + 1);
+      const r = ensureWithinCwdLexical(pathPart, cwd);
+      if (!r.ok) return { ok: false, reason: r.reason };
+    }
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// W4-BashArgvWalk: absolute/tilde argv rejection for non-git binaries
+// ---------------------------------------------------------------------------
+
+export type ArgvRejectReason =
+  | "AbsolutePathArg"
+  | "HomePathArg"
+  | "DotDotPathArg";
+
+/**
+ * Reject argv tokens that begin with `/` (absolute), `~`/`~/` (home), or
+ * contain a `..` path segment (parent traversal).
+ *
+ * Skips `argv[0]` (the binary name; ALLOWED_BINS already constrains it).
+ * Walked AFTER tokenize() + ALLOWED_BINS check; runs INSTEAD of
+ * `checkGitArgv` for non-`git` binaries (the git wrapper handles its own
+ * subcommand-specific path positions because git accepts ref-like tokens
+ * containing `/` such as `origin/main`).
+ *
+ * Rationale: tools like `cat`, `head`, `tail`, `wc`, `find`, `grep`, `rg`,
+ * `ls` all accept positional path arguments. Three escape vectors are out
+ * of scope for a read-only review tool:
+ *   - Absolute path (`/etc/passwd`): reaching outside the repo.
+ *   - `~/`-prefix (`~/.aws/credentials`): reaching into the runner's home.
+ *   - `..` segment (`../../etc/passwd`): walking up out of the cwd via
+ *     relative traversal. This was BOT-A2: prior to this, the wrapper
+ *     blocked absolute and `~/` but let `..` slip through.
+ *
+ * Windows-style absolute forms (BOT-C2): GitHub Actions runners are POSIX
+ * by deployment design, so `C:\Users\...` and `\\server\share` aren't
+ * dereferenceable to real Windows resources here. They're rejected anyway
+ * for two reasons: defense in depth if someone runs momus on a self-
+ * hosted Windows runner, and consistency: a tool that "blocks absolute
+ * paths" should reject every absolute-path syntax, not only POSIX. The
+ * patterns covered: drive-letter (`C:\`, `c:/`), UNC (`\\server\share`,
+ * `\\?\...`), and single-backslash root (`\Windows\System32`).
+ *
+ * `..` is matched as a path SEGMENT (between separators), so legitimate
+ * filenames like `a..b.txt` are still accepted. Both `/` and `\` are
+ * treated as separators to catch `..` smuggled through Windows-style
+ * mixed paths.
+ */
+export function rejectAbsoluteArgv(
+  argv: string[],
+):
+  | { ok: true }
+  | { ok: false; reason: ArgvRejectReason; offending: string } {
+  for (let i = 1; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.startsWith("/")) {
+      return { ok: false, reason: "AbsolutePathArg", offending: tok };
+    }
+    // Windows absolute forms: drive-letter (C:\, c:/), UNC (\\...), and
+    // single-backslash root (\foo). All map to "AbsolutePathArg" since
+    // the same containment intent applies — no escape-via-Windows-syntax.
+    if (
+      /^[A-Za-z]:[\\/]/.test(tok) ||
+      tok.startsWith("\\\\") ||
+      tok.startsWith("\\")
+    ) {
+      return { ok: false, reason: "AbsolutePathArg", offending: tok };
+    }
+    if (tok === "~" || tok.startsWith("~/")) {
+      return { ok: false, reason: "HomePathArg", offending: tok };
+    }
+    // Split on both `/` and `\` so a Windows-style path can't sneak `..`
+    // past us. `tok === ".."` and any embedded `..` segment both reject.
+    const segments = tok.split(/[/\\]/);
+    if (segments.includes("..")) {
+      return { ok: false, reason: "DotDotPathArg", offending: tok };
+    }
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// W4-WriteOutputRealpath: write_output execute body with symlink hardening
+// ---------------------------------------------------------------------------
+
+export interface WriteOutputParams {
+  path: string;
+  content: string;
+}
+
+/**
+ * write_output execute body. Exported so tests can drive it with explicit
+ * cwd + outputsAbs (the registered tool wraps this with `process.cwd()`
+ * and `resolve(cwd, OUTPUTS_DIR)`).
+ *
+ * Containment per design §W4 ordered steps:
+ *   1. Resolve relative path; reject `..` traversal and non-OUTPUTS_DIR prefix.
+ *   2. mkdir parent dir (recursive).
+ *   3. realpath(parent) — now guaranteed to exist; rejects symlinked parent.
+ *   4. Compose realPath = realParent + basename(resolved).
+ *   5. Assert `relative(realOutputs, realPath)` is contained.
+ *   6. If realPath already exists, realpath it; reject if it escapes outputs.
+ *   7. writeFileSync.
+ */
+export async function executeWriteOutput(
+  params: WriteOutputParams,
+  cwd: string,
+  outputsAbs: string,
+): Promise<any> {
+  const { path: inputPath, content } = params;
+  const outputsDirRel = relative(cwd, outputsAbs) || basename(outputsAbs);
+
+  const abs = resolve(cwd, inputPath);
+  const rel = relative(cwd, abs);
+
+  // (1) Existing absolute / `..` traversal / wrong-prefix rejection.
+  if (
+    isAbsolute(rel) ||
+    rel.startsWith("..") ||
+    (rel !== outputsDirRel && !rel.startsWith(`${outputsDirRel}/`))
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: path must be under ${outputsDirRel}/ (got '${rel}')`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const parentDir = dirname(abs);
+
+  // (2) Ensure parent exists. mkdir comes BEFORE realpath because
+  // realpathSync throws ENOENT on missing dirs.
+  try {
+    mkdirSync(parentDir, { recursive: true });
+  } catch (e: any) {
+    return {
+      content: [
+        { type: "text", text: `rejected: mkdir parent failed: ${e?.message}` },
+      ],
+      isError: true,
+    };
+  }
+
+  // (3) realpath the parent. If parent is a symlink that escapes outputs,
+  // this is where we catch it. realpath(outputsAbs) may itself be a
+  // symlink to a legitimate location (e.g., macOS /var -> /private/var);
+  // both sides go through realpath so the relative-path comparison is
+  // consistent.
+  //
+  // We ALSO realpath cwd and require realOutputs to live inside it: this
+  // catches the "OUTPUTS_DIR is itself an outbound symlink" attack, where
+  // both realParent and realOutputs resolve to the same attacker dir and
+  // the relative-path containment check below would otherwise pass.
+  let realParent: string;
+  let realOutputs: string;
+  let realCwd: string;
+  try {
+    realParent = realpathSync(parentDir);
+    realOutputs = realpathSync(outputsAbs);
+    realCwd = realpathSync(cwd);
+  } catch (e: any) {
+    return {
+      content: [
+        { type: "text", text: `rejected: realpath parent failed: ${e?.message}` },
+      ],
+      isError: true,
+    };
+  }
+  const relOutputsFromCwd = relative(realCwd, realOutputs);
+  if (
+    relOutputsFromCwd.startsWith("..") ||
+    isAbsolute(relOutputsFromCwd) ||
+    relOutputsFromCwd === ".."
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: ParentEscapesOutputs (realOutputs='${realOutputs}' realCwd='${realCwd}')`,
+        },
+      ],
+      isError: true,
+      details: { error: "ParentEscapesOutputs", realOutputs, realCwd },
+    };
+  }
+
+  // (4) Compose final path.
+  const realPath = resolve(realParent, basename(abs));
+
+  // (5) Containment: realPath must be inside realOutputs.
+  const relFromOutputs = relative(realOutputs, realPath);
+  if (
+    relFromOutputs.startsWith("..") ||
+    isAbsolute(relFromOutputs) ||
+    relFromOutputs === ".."
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `rejected: ParentEscapesOutputs (realParent='${realParent}' realOutputs='${realOutputs}')`,
+        },
+      ],
+      isError: true,
+      details: { error: "ParentEscapesOutputs", realParent, realOutputs },
+    };
+  }
+
+  // (6) If realPath already exists as a symlink that escapes outputs, reject.
+  if (existsSync(realPath)) {
+    let realFinal: string;
+    try {
+      realFinal = realpathSync(realPath);
+    } catch (e: any) {
+      return {
+        content: [
+          { type: "text", text: `rejected: realpath final failed: ${e?.message}` },
+        ],
+        isError: true,
+      };
+    }
+    const relFinal = relative(realOutputs, realFinal);
+    if (
+      relFinal.startsWith("..") ||
+      isAbsolute(relFinal) ||
+      relFinal === ".."
+    ) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `rejected: ExistingPathEscapesOutputs (realFinal='${realFinal}')`,
+          },
+        ],
+        isError: true,
+        details: { error: "ExistingPathEscapesOutputs", realFinal },
+      };
+    }
+  }
+
+  // (7) Write.
+  writeFileSync(realPath, content, "utf8");
+
+  return {
+    content: [
+      { type: "text", text: `wrote ${rel} (${content.length} bytes)` },
+    ],
+    details: { path: rel, bytes: content.length },
+  };
+}
 
 class RejectError extends Error {}
 
@@ -141,6 +1106,20 @@ export default function (pi: ExtensionAPI) {
         "this env var to obtain the API key for the 'byo' provider.",
     );
   }
+  // Pull pricing from pi-ai's bundled model registry so per-turn cost is
+  // populated on every assistant message event. Pi-ai's calculateCost runs
+  // inside the streaming response handler and writes usage.cost.{input,
+  // output,cacheRead,cacheWrite,total} on each message; momus then sums
+  // those at agent_end and renders the total in the review footer.
+  //
+  // Lookup strategy: scan every registered provider for a model whose id
+  // matches LLM_MODEL exactly. We don't constrain to "openrouter" because
+  // the same id is sometimes registered under multiple providers
+  // (deepseek/deepseek-v4-pro lives under both "openrouter" and direct
+  // "deepseek"). First match wins; in practice the pricing converges.
+  // If no match, fall back to zeros and momus suppresses the cost line —
+  // tokens still surface so a magnitude check is possible.
+  const cost = lookupModelCost(model);
   pi.registerProvider("byo", {
     name: "BYO (OpenAI-compatible)",
     baseUrl,
@@ -152,7 +1131,7 @@ export default function (pi: ExtensionAPI) {
         name: model,
         reasoning: false,
         input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        cost,
         contextWindow: 128000,
         maxTokens: 8192,
       },
@@ -186,6 +1165,83 @@ export default function (pi: ExtensionAPI) {
       rewriteThinkingSignaturesForDeepSeek(event.messages);
     });
   }
+
+  pi.registerTool({
+    name: "read_repo",
+    label: "read (repo-cwd contained)",
+    description:
+      "Read a file relative to the repo cwd. Absolute and ~/ paths are " +
+      "rejected; symlinks that escape the cwd are rejected; the deny-list " +
+      "(/proc, /etc, /sys, /dev) is unreachable. Output is line-sliced " +
+      "via optional `offset` and `limit`.",
+    parameters: Type.Object({
+      path: Type.String({ description: "Relative path under cwd." }),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096 })),
+    }),
+    async execute(_id, params) {
+      return executeReadRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "grep_repo",
+    label: "grep (repo-cwd contained)",
+    description:
+      "Search for a regex pattern under the repo cwd. Absolute and ~/ " +
+      "paths are rejected; symlinks escaping cwd are skipped silently. " +
+      "Returns up to 1000 matches. Output always includes line numbers " +
+      "in the form 'file:line:text' (no -n toggle).",
+    parameters: Type.Object({
+      pattern: Type.String({ description: "Regular expression." }),
+      path: Type.Optional(
+        Type.String({ description: "Relative path under cwd." }),
+      ),
+      "-i": Type.Optional(Type.Boolean()),
+    }),
+    async execute(_id, params) {
+      return executeGrepRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "find_repo",
+    label: "find (repo-cwd contained)",
+    description:
+      "Find files/directories by name under the repo cwd. Absolute and " +
+      "~/ paths are rejected; symlinks escaping cwd are skipped silently. " +
+      "Returns up to 5000 results.",
+    parameters: Type.Object({
+      path: Type.Optional(Type.String()),
+      name: Type.Optional(
+        Type.String({ description: "Glob pattern, e.g. '*.py'." }),
+      ),
+      type: Type.Optional(
+        Type.Union([
+          Type.Literal("file"),
+          Type.Literal("directory"),
+          Type.Literal("symlink"),
+        ]),
+      ),
+    }),
+    async execute(_id, params) {
+      return executeFindRepo(params, process.cwd());
+    },
+  });
+
+  pi.registerTool({
+    name: "ls_repo",
+    label: "ls (repo-cwd contained)",
+    description:
+      "List a single directory under the repo cwd. Absolute and ~/ paths " +
+      "are rejected; broken symlinks are skipped.",
+    parameters: Type.Object({
+      path: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params) {
+      return executeLsRepo(params, process.cwd());
+    },
+  });
 
   pi.registerTool({
     name: "bash_ro",
@@ -234,6 +1290,51 @@ export default function (pi: ExtensionAPI) {
           ],
           isError: true,
         };
+      }
+
+      // W2-Wrapper / W4-BashArgvWalk:
+      //   - For `git`, run the deterministic per-subcommand path
+      //     containment from W2 (refs may legitimately contain `/`).
+      //   - For every other allowed bin, run rejectAbsoluteArgv: any
+      //     positional starting with `/` or `~` is out of scope for a
+      //     read-only review tool.
+      if (bin === "git") {
+        const gitCheck = checkGitArgv(argv, process.cwd());
+        if (!gitCheck.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                  `git path argument outside repo: ${gitCheck.reason}\n`,
+              },
+            ],
+            details: { exitCode: 2, gitArgvReject: gitCheck.reason },
+            isError: true,
+          };
+        }
+      } else {
+        const argCheck = rejectAbsoluteArgv(argv);
+        if (!argCheck.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                  `argv contains disallowed path token: ${argCheck.reason} ` +
+                  `(${argCheck.offending})\n`,
+              },
+            ],
+            details: {
+              exitCode: 2,
+              argvReject: argCheck.reason,
+              offending: argCheck.offending,
+            },
+            isError: true,
+          };
+        }
       }
 
       return await new Promise((resolveP) => {
@@ -307,34 +1408,10 @@ export default function (pi: ExtensionAPI) {
       }),
       content: Type.String({ description: "File contents." }),
     }),
-    async execute(_id, { path, content }) {
+    async execute(_id, params) {
       const cwd = process.cwd();
-      const abs = resolve(cwd, path);
-      const rel = relative(cwd, abs);
-
-      if (
-        isAbsolute(rel) ||
-        rel.startsWith("..") ||
-        (rel !== OUTPUTS_DIR && !rel.startsWith(`${OUTPUTS_DIR}/`))
-      ) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `rejected: path must be under ${OUTPUTS_DIR}/ (got '${rel}')`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content, "utf8");
-
-      return {
-        content: [{ type: "text", text: `wrote ${rel} (${content.length} bytes)` }],
-        details: { path: rel, bytes: content.length },
-      };
+      const outputsAbs = resolve(cwd, OUTPUTS_DIR);
+      return executeWriteOutput(params, cwd, outputsAbs);
     },
   });
 }

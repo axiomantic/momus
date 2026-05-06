@@ -4,14 +4,68 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .findings_schema import Finding, FindingsDoc
+from .invoke_pi import PhaseUsage
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "nit"]
+
+
+# ---------------------------------------------------------------------------
+# W5-Redaction: scrub credential-shaped strings + off-domain images
+# ---------------------------------------------------------------------------
+#
+# Applied to every LLM-emitted publish-bound string (summary, finding
+# title/message/suggestion, noteworthy entries) inside render_review_body
+# and _finding_inline_body. Centralizing redaction at construction time
+# means the 422-retry branches in _submit_review automatically inherit
+# redaction without re-applying it to already-redacted strings.
+#
+# Token patterns: high-confidence prefix + length combinations only.
+# Anything looser would burn legitimate review prose (`sk_buffer`,
+# `AKIATooShort`, etc.).
+#
+# Off-domain image stripping: defends against the CamoLeak class of
+# exfiltration where an attacker-shaped finding embeds an `![](evil.com)`
+# whose URL path encodes data; GitHub camo-fetches the image and the
+# attacker's server logs the request. github.com and
+# user-images.githubusercontent.com are the only domains we allow because
+# (a) they're GitHub's own image hosts and (b) requests to them are
+# already traceable in GitHub's audit log.
+TOKEN_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bghp_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bgho_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghu_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghs_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bghr_[A-Za-z0-9]{36}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9]{48,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+]
+
+OFF_DOMAIN_IMG_RE = re.compile(
+    r"!\[[^\]]*\]\((?!https?://github\.com|https?://user-images\.githubusercontent\.com)[^)]+\)"
+)
+
+
+def redact_for_publish(text: str) -> tuple[str, int]:
+    """Return (redacted_text, n_redactions) for a publisher-bound string.
+
+    n_redactions counts only credential-token replacements; off-domain
+    image strips are not counted (they're a separate exfiltration class
+    and the caller logs them separately).
+    """
+    n = 0
+    for pat in TOKEN_PATTERNS:
+        text, k = pat.subn("[redacted]", text)
+        n += k
+    text = OFF_DOMAIN_IMG_RE.sub("[image stripped: off-domain]", text)
+    return text, n
 SEVERITY_LABELS = {
     "critical": "Critical",
     "high": "High",
@@ -26,21 +80,34 @@ class PublishError(RuntimeError):
 
 
 def publish(
-    findings_doc: dict[str, Any],
+    findings_doc: FindingsDoc | dict[str, Any],
     priors: list[dict[str, Any]],
     pr_meta: dict[str, Any],
     config: Config,
     run_url: str,
+    phase_usages: list[tuple[str, PhaseUsage]] | None = None,
 ) -> None:
+    """Publish a validated FindingsDoc to GitHub.
+
+    Post-W5: the typed shape is `FindingsDoc`. The orchestrator
+    (`__main__._read_findings_doc`) validates before calling. Dict input
+    is accepted for legacy test callers that build payloads inline; it
+    runs through the same `FindingsDoc.model_validate` so the eventual
+    publish-bound state is identical regardless of entry point.
+    """
+    if not isinstance(findings_doc, FindingsDoc):
+        findings_doc = FindingsDoc.model_validate(findings_doc)
     owner = pr_meta["owner"]
     repo = pr_meta["repo"]
     pr_number = pr_meta["pr_number"]
     head_sha = pr_meta["head_sha"]
     run_id = pr_meta.get("run_id", "A")
 
-    body = render_review_body(findings_doc, run_url, run_id, config)
-    inline_comments = build_inline_comments(findings_doc.get("findings", []), run_url, run_id)
-    event = findings_doc.get("verdict", "COMMENT")
+    body = render_review_body(
+        findings_doc, run_url, run_id, config, phase_usages=phase_usages
+    )
+    inline_comments = build_inline_comments(findings_doc.findings, run_url, run_id)
+    event = findings_doc.verdict
 
     # Pre-emptive downgrade for cases we can decide from the token's user
     # info alone: self-approval (token user == PR author) and Bot-typed
@@ -69,23 +136,43 @@ def publish(
         repo=repo,
         pr_number=pr_number,
         priors=priors,
-        prior_status=findings_doc.get("prior_findings_status", []),
+        prior_status=[
+            p.model_dump() for p in findings_doc.prior_findings_status
+        ],
         head_sha=head_sha,
         run_url=run_url,
     )
 
 
 def render_review_body(
-    findings_doc: dict[str, Any],
+    findings_doc: FindingsDoc | dict[str, Any],
     run_url: str,
     run_id: str,
     config: Config,
+    phase_usages: list[tuple[str, PhaseUsage]] | None = None,
 ) -> str:
-    summary = findings_doc.get("summary", "").strip() or "(no summary)"
-    tally = findings_doc.get("tally", {})
-    findings = findings_doc.get("findings", [])
-    noteworthy = findings_doc.get("noteworthy", []) or []
-    verdict = findings_doc.get("verdict", "COMMENT")
+    """Render the markdown body. Accepts FindingsDoc (post-W5) or dict
+    (legacy callers in tests). Applies redaction to every LLM-emitted
+    string at construction time so the 422-retry branches in
+    `_submit_review` automatically inherit redaction.
+    """
+    if isinstance(findings_doc, FindingsDoc):
+        summary_raw = findings_doc.summary
+        tally = findings_doc.tally
+        findings_models = findings_doc.findings
+        findings = [f.model_dump() for f in findings_models]
+        noteworthy_raw = findings_doc.noteworthy or []
+        verdict = findings_doc.verdict
+    else:
+        summary_raw = findings_doc.get("summary", "").strip() or "(no summary)"
+        tally = findings_doc.get("tally", {})
+        findings = findings_doc.get("findings", [])
+        noteworthy_raw = findings_doc.get("noteworthy", []) or []
+        verdict = findings_doc.get("verdict", "COMMENT")
+
+    summary = summary_raw.strip() or "(no summary)"
+    summary, _ = redact_for_publish(summary)
+    noteworthy = [redact_for_publish(n)[0] for n in noteworthy_raw]
 
     parts: list[str] = [summary, "", _tally_line(tally)]
 
@@ -111,12 +198,45 @@ def render_review_body(
     parts.append(f"**Verdict:** {verdict}.")
     parts.append("")
     parts.append(_commands_footer())
+    cost_line = _cost_footer_line(phase_usages or [])
+    if cost_line is not None:
+        parts.append("")
+        parts.append(cost_line)
     parts.append("")
     parts.append(_attribution_line())
     parts.append("")
     parts.append(f"<!-- momus:run:{run_id} -->")
     parts.append(f"<!-- run: {run_url} -->")
     return "\n".join(parts)
+
+
+def _cost_footer_line(
+    phase_usages: list[tuple[str, PhaseUsage]],
+) -> str | None:
+    """Render `Cost: $X.YZ - I in / O out tokens - model` or None.
+
+    Returns None when there's no usage data to summarize. The cost is
+    rounded to whole cents (two decimals) per spec; sub-cent runs render
+    as `$0.00`. The model name comes from PhaseUsage and is the same
+    across phases under normal operation, so we take it from the first
+    non-empty phase.
+    """
+    if not phase_usages:
+        return None
+    total_cost = sum(u.cost_usd for _, u in phase_usages)
+    total_in = sum(u.input_tokens for _, u in phase_usages)
+    total_out = sum(u.output_tokens for _, u in phase_usages)
+    if total_in == 0 and total_out == 0:
+        return None
+    model = next((u.model for _, u in phase_usages if u.model), "")
+    cents = round(total_cost * 100)
+    dollars = cents // 100
+    rem = cents % 100
+    cost_str = f"${dollars}.{rem:02d}"
+    tokens_str = f"{total_in:,} in / {total_out:,} out tokens"
+    if model:
+        return f"_Cost: {cost_str} - {tokens_str} - {model}_"
+    return f"_Cost: {cost_str} - {tokens_str}_"
 
 
 def _tally_line(tally: dict[str, int]) -> str:
@@ -138,10 +258,12 @@ def _group_by_severity(findings: list[dict[str, Any]]) -> dict[str, list[dict[st
 
 
 def _finding_one_liner(f: dict[str, Any]) -> str:
-    fid = f.get("id", "BOT-?")
+    fid_raw = f.get("id", "BOT-?")
+    fid, _ = redact_for_publish(fid_raw)
     file = f.get("file", "?")
     line = f.get("line", "?")
-    title = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title_raw = (f.get("title") or f.get("message", "")).strip().splitlines()[0]
+    title, _ = redact_for_publish(title_raw)
     return f"- **{fid}** (`{file}:{line}`): {title}"
 
 
@@ -191,22 +313,31 @@ def _commands_footer() -> str:
 
 
 def build_inline_comments(
-    findings: list[dict[str, Any]],
+    findings: list[dict[str, Any]] | list[Finding],
     run_url: str,
     run_id: str,
 ) -> list[dict[str, Any]]:
+    """Build inline-comment payloads from findings (validated models or dicts).
+
+    Accepts both the post-W5 `list[Finding]` and the pre-W5 `list[dict]`
+    so test helpers and any legacy callers that hand in dicts continue
+    to work.
+    """
     comments: list[dict[str, Any]] = []
     for f in findings:
-        body = _finding_inline_body(f, run_url, run_id)
+        f_dict: dict[str, Any] = (
+            f.model_dump() if isinstance(f, Finding) else f
+        )
+        body = _finding_inline_body(f_dict, run_url, run_id)
         comment: dict[str, Any] = {
-            "path": f["file"],
-            "line": f["line"],
-            "side": f.get("side", "RIGHT"),
+            "path": f_dict["file"],
+            "line": f_dict["line"],
+            "side": f_dict.get("side", "RIGHT"),
             "body": body,
         }
-        end_line = f.get("end_line")
-        if isinstance(end_line, int) and end_line > f["line"]:
-            comment["start_line"] = f["line"]
+        end_line = f_dict.get("end_line")
+        if isinstance(end_line, int) and end_line > f_dict["line"]:
+            comment["start_line"] = f_dict["line"]
             comment["start_side"] = comment["side"]
             comment["line"] = end_line
         comments.append(comment)
@@ -214,12 +345,26 @@ def build_inline_comments(
 
 
 def _finding_inline_body(f: dict[str, Any], run_url: str, run_id: str) -> str:
-    fid = f.get("id", "BOT-?")
+    fid_raw = f.get("id", "BOT-?")
     sev = f.get("severity", "medium")
-    cat = f.get("category", "quality")
-    title = (f.get("title") or "").strip()
-    message = f.get("message", "").strip()
-    suggestion = f.get("suggestion")
+    cat_raw = f.get("category", "quality")
+    title_raw = (f.get("title") or "").strip()
+    message_raw = f.get("message", "").strip()
+    suggestion_raw = f.get("suggestion")
+    # W5-Redaction: scrub credentials in every LLM-emitted field that
+    # reaches the rendered body. Severity is a closed Literal in the
+    # schema; run_id and run_url are workflow-supplied. Everything else
+    # (id, category, title, message, suggestion) is LLM-emitted free
+    # text and goes through redact_for_publish.
+    fid, _ = redact_for_publish(fid_raw)
+    cat, _ = redact_for_publish(cat_raw)
+    title, _ = redact_for_publish(title_raw)
+    message, _ = redact_for_publish(message_raw)
+    suggestion = (
+        redact_for_publish(suggestion_raw)[0]
+        if isinstance(suggestion_raw, str)
+        else suggestion_raw
+    )
 
     parts = [f"**{fid}** — {SEVERITY_LABELS.get(sev, sev)} ({cat})"]
     if title:

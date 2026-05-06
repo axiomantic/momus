@@ -15,10 +15,29 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  checkGitArgv,
+  ensureWithinCwd,
+  executeFindRepo,
+  executeGrepRepo,
+  executeLsRepo,
+  executeReadRepo,
+  executeWriteOutput,
   isDeepSeekViaOpenRouter,
+  lookupModelCost,
+  rejectAbsoluteArgv,
   rewriteThinkingSignaturesForDeepSeek,
+  validateMomusWorkDir,
 } from "./readonly-tools.ts";
+
+function makeCwd(): string {
+  // realpathSync to resolve macOS /var -> /private/var so the helper's
+  // realpath comparisons line up.
+  return realpathSync(mkdtempSync(join(tmpdir(), "momus-rotest-")));
+}
 
 // pi-ai is installed at workflow runtime via npm. For tests, the harness
 // installs it locally. If unavailable, skip with a clear message rather
@@ -291,5 +310,884 @@ describe("end-to-end: pi-ai convertMessages emits reasoning_content", () => {
     expect(assistant).toBeDefined();
     expect(assistant.reasoning_content).toBeUndefined();
     expect(assistant.reasoning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Read: read_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("read_repo", () => {
+  test("read_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "hello.txt"), "line1\nline2\nline3\n");
+    const result = await executeReadRepo({ path: "hello.txt" }, cwd);
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe("line1\nline2\nline3\n");
+    expect(result.details.lines_total).toBe(4); // trailing newline => 4 splits
+  });
+
+  test("read_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "/etc/passwd" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+    expect(result.details.path).toBe("/etc/passwd");
+  });
+
+  test("read_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "~/.aws/credentials" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("read_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "../escape.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("read_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-"));
+    writeFileSync(join(outside, "secret.txt"), "secret");
+    symlinkSync(join(outside, "secret.txt"), join(cwd, "link.txt"));
+    const result = await executeReadRepo({ path: "link.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("read_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    // The user-facing rejection path: a literal absolute path is OutsideRepo.
+    // The deny-list is the second wall, hit when realpath puts the resolved
+    // path into a deny-listed prefix (Linux). The platform-portable assertion
+    // is that the error is one of the rejection reasons in the §W2 taxonomy
+    // and the tool never returned content.
+    const cwd = makeCwd();
+    const result = await executeReadRepo(
+      { path: "/proc/self/environ" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+    // Negative property: the file's bytes are NOT in the response.
+    expect(JSON.stringify(result)).not.toContain("HOME=");
+  });
+
+  test("read_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    // Absolute /dev/null is rejected as OutsideRepo first.
+    const result = await executeReadRepo({ path: "/dev/null" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(["OutsideRepo", "DenyListedPath"]).toContain(result.details.error);
+  });
+
+  test("read_repo_returns_NotFound_for_missing_file_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeReadRepo({ path: "does-not-exist.txt" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+describe("ensureWithinCwd", () => {
+  test("rejects empty string with InvalidArgument", () => {
+    const cwd = makeCwd();
+    const r = ensureWithinCwd("", cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("InvalidArgument");
+  });
+
+  test("accepts paths when cwd is reached via a symlinked parent", () => {
+    // Caller passes a cwd whose path traverses a symlink (real-world
+    // analogue: macOS /var -> /private/var, or a CI runner that mounts
+    // the workspace via a symlinked parent dir). Pre-fix, every legit
+    // read tripped the parent-realpath check because realpath(parent)
+    // returned the post-symlink form while the cwd argument was still
+    // the pre-symlink form. The function must now realpath the cwd
+    // internally so the comparison is consistent.
+    const real = makeCwd();
+    writeFileSync(join(real, "a.txt"), "hello\n");
+    const linkParent = mkdtempSync(join(tmpdir(), "momus-rotest-link-"));
+    const linkedCwd = join(linkParent, "ws");
+    symlinkSync(real, linkedCwd);
+    const r = ensureWithinCwd("a.txt", linkedCwd);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.resolved).toBe(join(real, "a.txt"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cost lookup: BYO provider pricing pulled from pi-ai's bundled registry
+// ---------------------------------------------------------------------------
+
+describe("lookupModelCost", () => {
+  test("returns real pricing for a known OpenRouter model", () => {
+    // deepseek/deepseek-v4-pro is the bot's default model and is in
+    // pi-ai's bundled MODELS table under the openrouter provider with
+    // non-zero per-Mtok cost. If this assertion fails after a pi-ai
+    // upgrade, the fix is to re-pin LLM_MODEL or add a fallback price.
+    const cost = lookupModelCost("deepseek/deepseek-v4-pro");
+    expect(cost.input).toBeGreaterThan(0);
+    expect(cost.output).toBeGreaterThan(0);
+  });
+
+  test("returns zeros for an unknown model id", () => {
+    const cost = lookupModelCost("nonexistent-vendor/imaginary-model-9999");
+    expect(cost).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Grep: grep_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("grep_repo", () => {
+  test("grep_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.txt"), "alpha\nbeta\ngamma\n");
+    writeFileSync(join(cwd, "b.txt"), "alpha-only\n");
+    const result = await executeGrepRepo(
+      { pattern: "alpha", path: "." },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    const matches = result.details.matches as Array<{
+      file: string;
+      line: number;
+      text: string;
+    }>;
+    expect(matches.length).toBe(2);
+    const files = matches.map((m) => m.file).sort();
+    expect(files).toEqual(["a.txt", "b.txt"]);
+  });
+
+  test("grep_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/etc" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "~/secrets" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "../escape" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-grep-"));
+    writeFileSync(join(outside, "x.txt"), "alpha\n");
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeGrepRepo(
+      { pattern: "alpha", path: "linkdir" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("grep_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/proc/self/environ" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "/dev/null" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("grep_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeGrepRepo(
+      { pattern: "x", path: "no-such-dir" },
+      cwd,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Find: find_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("find_repo", () => {
+  test("find_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    mkdirSync(join(cwd, "sub"));
+    writeFileSync(join(cwd, "a.txt"), "");
+    writeFileSync(join(cwd, "sub", "b.txt"), "");
+    const result = await executeFindRepo({ path: ".", name: "*.txt" }, cwd);
+    expect(result.isError).toBeUndefined();
+    const results = (result.details.results as string[]).sort();
+    expect(results).toEqual(["a.txt", "sub/b.txt"]);
+  });
+
+  test("find_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/etc" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "~" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "../up" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-find-"));
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeFindRepo({ path: "linkdir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("find_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/proc/self/environ" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "/dev" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("find_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeFindRepo({ path: "no-such-dir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+
+  test("find_repo_finds_symlink_when_type_is_symlink", async () => {
+    // BOT-A1: prior to the fix, find_repo used statSync to determine type,
+    // which follows symlinks and reports the underlying file/dir type.
+    // `type: "symlink"` therefore never matched anything. With lstatSync
+    // for the type check, a symlink in tmp_path is reported as a symlink
+    // and returned.
+    const cwd = makeCwd();
+    const target = join(cwd, "real.txt");
+    writeFileSync(target, "hello\n");
+    symlinkSync(target, join(cwd, "link.txt"));
+    const result = await executeFindRepo(
+      { path: ".", type: "symlink" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual(["link.txt"]);
+  });
+
+  test("find_repo_does_not_return_regular_files_when_type_is_symlink", async () => {
+    // Sanity: with type=symlink, plain files MUST NOT be returned.
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "plain.txt"), "x\n");
+    const result = await executeFindRepo(
+      { path: ".", type: "symlink" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual([]);
+  });
+
+  test("find_repo_type_file_still_excludes_symlinks", async () => {
+    // The flip side: with type=file, a symlink to a file should NOT be
+    // counted (lstat reports it as a symlink, not a file). This guards
+    // against accidentally widening type=file to include symlinks.
+    const cwd = makeCwd();
+    const target = join(cwd, "real.txt");
+    writeFileSync(target, "hello\n");
+    symlinkSync(target, join(cwd, "link.txt"));
+    const result = await executeFindRepo(
+      { path: ".", type: "file" },
+      cwd,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(result.details.results).toEqual(["real.txt"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Tools-Ls: ls_repo containment + behavior
+// ---------------------------------------------------------------------------
+
+describe("ls_repo", () => {
+  test("ls_repo_accepts_relative_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.txt"), "");
+    mkdirSync(join(cwd, "subdir"));
+    const result = await executeLsRepo({ path: "." }, cwd);
+    expect(result.isError).toBeUndefined();
+    const entries = (
+      result.details.entries as Array<{ name: string; type: string }>
+    ).sort((x, y) => x.name.localeCompare(y.name));
+    expect(entries).toEqual([
+      { name: "a.txt", type: "file" },
+      { name: "subdir", type: "directory" },
+    ]);
+  });
+
+  test("ls_repo_rejects_absolute_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/etc" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_tilde_path_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "~/Library" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_dotdot_traversal_with_OutsideRepo", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: ".." }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_symlink_escaping_cwd_with_Symlink", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-outside-ls-"));
+    symlinkSync(outside, join(cwd, "linkdir"));
+    const result = await executeLsRepo({ path: "linkdir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("Symlink");
+  });
+
+  test("ls_repo_rejects_proc_self_environ_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/proc/self" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_rejects_dev_null_with_DenyListedPath", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "/dev" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("OutsideRepo");
+  });
+
+  test("ls_repo_returns_NotFound_for_missing_path_under_cwd", async () => {
+    const cwd = makeCwd();
+    const result = await executeLsRepo({ path: "no-such-dir" }, cwd);
+    expect(result.isError).toBe(true);
+    expect(result.details.error).toBe("NotFound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W2-Wrapper: bash_ro git-argv parser
+// ---------------------------------------------------------------------------
+
+describe("checkGitArgv", () => {
+  test("git_show_HEAD_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:src/foo.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_show_HEAD_absolute_path_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_show_HEAD_traversal_path_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "show", "HEAD:../escape.txt"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_cat_file_p_HEAD_etc_passwd_rejected_OutsideRepo", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "cat-file", "-p", "HEAD:/etc/passwd"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_log_p_dash_dash_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "f.py"), "");
+    const r = checkGitArgv(["git", "log", "-p", "--", "f.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_log_p_dash_dash_absolute_path_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "log", "-p", "--", "/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_blame_relative_path_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "x.py"), "");
+    const r = checkGitArgv(["git", "blame", "--", "x.py"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_blame_absolute_path_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "blame", "--", "/etc/passwd"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("OutsideRepo");
+  });
+
+  test("git_status_succeeds_no_path_args", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "status"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_unsupported_subcommand_rejected", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "push", "origin", "main"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("UnsupportedGitSubcommand");
+  });
+
+  test("git_diff_no_index_rejected_UnsupportedGitOption", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "diff", "--no-index", "a.py", "b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("UnsupportedGitOption");
+  });
+
+  test("git_diff_two_paths_no_dashdash_rejected_AmbiguousDiffArgv", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.py"), "");
+    writeFileSync(join(cwd, "b.py"), "");
+    writeFileSync(join(cwd, "c.py"), "");
+    // 3 non-flag, non-ref-range positionals with no `--` => ambiguous.
+    const r = checkGitArgv(["git", "diff", "a.py", "b.py", "c.py"], cwd);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AmbiguousDiffArgv");
+  });
+
+  test("git_diff_with_dashdash_succeeds", () => {
+    const cwd = makeCwd();
+    writeFileSync(join(cwd, "a.py"), "");
+    writeFileSync(join(cwd, "b.py"), "");
+    const r = checkGitArgv(
+      ["git", "diff", "HEAD~1", "HEAD", "--", "a.py", "b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("git_diff_ref_range_succeeds", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(["git", "diff", "main..HEAD"], cwd);
+    expect(r.ok).toBe(true);
+  });
+
+  test("toolcall_log_appends_one_line_per_call_when_env_set", async () => {
+    const cwd = makeCwd();
+    const logPath = join(cwd, "calls.jsonl");
+    process.env.MOMUS_TOOLCALL_LOG = logPath;
+    try {
+      writeFileSync(join(cwd, "a.txt"), "x\n");
+      await executeReadRepo({ path: "a.txt" }, cwd);
+      await executeReadRepo({ path: "/etc/passwd" }, cwd);
+    } finally {
+      delete process.env.MOMUS_TOOLCALL_LOG;
+    }
+    const lines = require("node:fs")
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n");
+    expect(lines.length).toBe(2);
+    const first = JSON.parse(lines[0]);
+    expect(first.tool).toBe("read_repo");
+    expect(first.params.path).toBe("a.txt");
+    expect(first.error).toBe(null);
+    expect(first.resolved_path).toContain(cwd);
+    expect(typeof first.ts).toBe("string");
+    const second = JSON.parse(lines[1]);
+    expect(second.tool).toBe("read_repo");
+    expect(second.error).toBe("OutsideRepo");
+    expect(second.resolved_path).toBe(null);
+  });
+
+  test("toolcall_log_skipped_when_env_unset", async () => {
+    const cwd = makeCwd();
+    delete process.env.MOMUS_TOOLCALL_LOG;
+    writeFileSync(join(cwd, "b.txt"), "y\n");
+    // Should not throw and not write anything anywhere.
+    const r = await executeReadRepo({ path: "b.txt" }, cwd);
+    expect(r.isError).toBeUndefined();
+  });
+
+  test("toolcall_log_includes_resolved_path_for_read_repo", async () => {
+    const cwd = makeCwd();
+    const logPath = join(cwd, "calls2.jsonl");
+    process.env.MOMUS_TOOLCALL_LOG = logPath;
+    try {
+      writeFileSync(join(cwd, "c.txt"), "z\n");
+      await executeReadRepo({ path: "c.txt" }, cwd);
+    } finally {
+      delete process.env.MOMUS_TOOLCALL_LOG;
+    }
+    const line = require("node:fs")
+      .readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")[0];
+    const ev = JSON.parse(line);
+    expect(ev.resolved_path).toContain(cwd);
+    expect(ev.resolved_path.endsWith("c.txt")).toBe(true);
+  });
+
+  test("git_show_two_ref_path_tokens_rejected_AmbiguousShowArgv", () => {
+    const cwd = makeCwd();
+    const r = checkGitArgv(
+      ["git", "show", "HEAD:src/a.py", "HEAD~1:src/b.py"],
+      cwd,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AmbiguousShowArgv");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-BashArgvWalk: rejectAbsoluteArgv for non-git binaries
+// ---------------------------------------------------------------------------
+
+describe("rejectAbsoluteArgv", () => {
+  test("bash_ro_rejects_absolute_argv_token", () => {
+    // `cat /etc/passwd` — absolute path positional must be rejected.
+    const r = rejectAbsoluteArgv(["cat", "/etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("AbsolutePathArg");
+      expect(r.offending).toBe("/etc/passwd");
+    }
+  });
+
+  test("bash_ro_rejects_tilde_argv_token", () => {
+    // `cat ~/secrets` — tilde-rooted path positional must be rejected.
+    const r = rejectAbsoluteArgv(["cat", "~/secrets"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("HomePathArg");
+      expect(r.offending).toBe("~/secrets");
+    }
+  });
+
+  test("bash_ro_rejects_bare_tilde_argv_token", () => {
+    const r = rejectAbsoluteArgv(["ls", "~"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("HomePathArg");
+      expect(r.offending).toBe("~");
+    }
+  });
+
+  test("bash_ro_allows_relative_path_argv_token", () => {
+    // `grep -r foo .` — entirely relative; must pass.
+    const r = rejectAbsoluteArgv(["grep", "-r", "foo", "."]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_relative_subdir_path", () => {
+    // `find src -name '*.py'` — relative path arg.
+    const r = rejectAbsoluteArgv(["find", "src", "-name", "*.py"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_no_positional_args", () => {
+    const r = rejectAbsoluteArgv(["ls"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_does_not_inspect_argv0_for_absolute", () => {
+    // argv[0] is the binary name, not a path arg. The caller has already
+    // run the ALLOWED_BINS check; we MUST NOT re-reject here.
+    const r = rejectAbsoluteArgv(["ls", "subdir"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_rejects_dotdot_traversal_argv_token", () => {
+    // BOT-A2: `cat ../../etc/passwd` — `..` traversal must be rejected.
+    // Absolute paths (`/etc/passwd`) and `~/` already covered, but a leading
+    // `..` segment can still escape the cwd. The model should not be allowed
+    // to walk out of the contained region via relative traversal.
+    const r = rejectAbsoluteArgv(["cat", "../../etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("../../etc/passwd");
+    }
+  });
+
+  test("bash_ro_rejects_bare_dotdot_argv_token", () => {
+    const r = rejectAbsoluteArgv(["ls", ".."]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("..");
+    }
+  });
+
+  test("bash_ro_rejects_embedded_dotdot_segment", () => {
+    // `cat foo/../../etc/passwd` — `..` segment in middle still escapes.
+    const r = rejectAbsoluteArgv(["cat", "foo/../../etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("foo/../../etc/passwd");
+    }
+  });
+
+  test("bash_ro_allows_token_containing_dotdot_substring_but_not_segment", () => {
+    // `..` as a substring of a filename component is fine (e.g. `a..b`),
+    // only path-segment `..` should be rejected. Legitimate filenames may
+    // include consecutive dots.
+    const r = rejectAbsoluteArgv(["cat", "a..b.txt"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_legitimate_relative_filename_after_dotdot_fix", () => {
+    // Sanity: the canonical example from the finding still works.
+    const r = rejectAbsoluteArgv(["cat", "README.md"]);
+    expect(r.ok).toBe(true);
+  });
+
+  // BOT-C2: Windows-style absolute paths must also be rejected. GHA
+  // runners are POSIX so the symbolic risk is low, but the contract
+  // ("no absolute paths in argv") is broken if we only catch /-prefix
+  // forms. Coverage: drive-letter (C:\, c:/), UNC (\\server\share),
+  // extended-prefix UNC (\\?\C:\), single-backslash root.
+
+  test("bash_ro_rejects_windows_drive_letter_backslash_argv_token", () => {
+    const r = rejectAbsoluteArgv(["cat", "C:\\Windows\\System32"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("AbsolutePathArg");
+      expect(r.offending).toBe("C:\\Windows\\System32");
+    }
+  });
+
+  test("bash_ro_rejects_windows_drive_letter_forward_slash_argv_token", () => {
+    // Mixed-separator form (cygwin/git-bash style) with a Windows drive
+    // letter still presents as absolute.
+    const r = rejectAbsoluteArgv(["cat", "c:/temp/foo.txt"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_unc_path_argv_token", () => {
+    const r = rejectAbsoluteArgv(["cat", "\\\\server\\share\\file"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_extended_prefix_unc_argv_token", () => {
+    // `\\?\C:\foo` — Windows extended-length-path prefix.
+    const r = rejectAbsoluteArgv(["cat", "\\\\?\\C:\\foo"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_rejects_single_backslash_root_argv_token", () => {
+    // `\Windows\System32` — Windows current-drive-absolute. Less common
+    // in practice but completes the absolute-path coverage.
+    const r = rejectAbsoluteArgv(["cat", "\\Windows\\System32"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("AbsolutePathArg");
+  });
+
+  test("bash_ro_allows_relative_path_with_embedded_backslash", () => {
+    // `dir\file.txt` is a legitimate POSIX filename that happens to
+    // contain a backslash (the byte is allowed in POSIX names). The
+    // Windows-absolute checks must not trip on backslashes mid-token,
+    // only at token start or in the drive-letter prefix.
+    const r = rejectAbsoluteArgv(["cat", "dir\\file.txt"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_drive_letter_without_separator", () => {
+    // `C:notdrive` — drive-relative on Windows, but on POSIX it's just
+    // a regular filename with a colon. Without a /\\ after the colon,
+    // it isn't an absolute reference, so we accept.
+    const r = rejectAbsoluteArgv(["cat", "C:notdrive"]);
+    expect(r.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-WriteOutputRealpath: write_output post-realpath containment
+// ---------------------------------------------------------------------------
+
+describe("write_output realpath containment", () => {
+  test("write_output_succeeds_when_parent_realpath_inside_outputs", async () => {
+    const cwd = makeCwd();
+    // OUTPUTS_DIR resolves to "outputs" relative to cwd by default.
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: '{"ok": true}' },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBeUndefined();
+    expect(
+      require("node:fs").readFileSync(join(outputsAbs, "findings.json"), "utf8"),
+    ).toBe('{"ok": true}');
+  });
+
+  test("write_output_rejects_symlinked_parent_dir", async () => {
+    const cwd = makeCwd();
+    const outside = mkdtempSync(join(tmpdir(), "momus-write-attacker-"));
+    // Create a symlink at "outputs" that points outside the repo.
+    symlinkSync(realpathSync(outside), join(cwd, "outputs"));
+    // realOutputs resolves to the attacker dir; write_output's containment
+    // check uses outputsAbs (cwd/outputs) as intended root. The symlink
+    // makes realParent escape that root.
+    const outputsAbs = join(cwd, "outputs");
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: "x" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("ParentEscapesOutputs");
+  });
+
+  test("write_output_rejects_existing_path_that_is_outbound_symlink", async () => {
+    const cwd = makeCwd();
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    // Place an existing symlink at outputs/findings.json -> /etc/passwd
+    // (using a real outside file so realpathSync resolves cleanly).
+    const outside = mkdtempSync(join(tmpdir(), "momus-write-existing-"));
+    const outsideTarget = join(outside, "secret.txt");
+    writeFileSync(outsideTarget, "secret");
+    symlinkSync(realpathSync(outsideTarget), join(outputsAbs, "findings.json"));
+    const r = await executeWriteOutput(
+      { path: "outputs/findings.json", content: "overwrite" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("ExistingPathEscapesOutputs");
+    // The outside file MUST be unchanged.
+    expect(
+      require("node:fs").readFileSync(outsideTarget, "utf8"),
+    ).toBe("secret");
+  });
+
+  test("write_output_rejects_dotdot_traversal", async () => {
+    const cwd = makeCwd();
+    const outputsAbs = join(cwd, "outputs");
+    mkdirSync(outputsAbs);
+    const r = await executeWriteOutput(
+      { path: "../escape.json", content: "x" },
+      cwd,
+      outputsAbs,
+    );
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r)).toContain("rejected");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W4-WorkDirValidation: MOMUS_WORK_DIR validation at extension load
+// ---------------------------------------------------------------------------
+
+describe("validateMomusWorkDir", () => {
+  test("momus_work_dir_validation_accepts_dot_momus", () => {
+    expect(() => validateMomusWorkDir(".momus")).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_accepts_simple_relative", () => {
+    expect(() => validateMomusWorkDir("work/momus")).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_accepts_undefined", () => {
+    expect(() => validateMomusWorkDir(undefined)).not.toThrow();
+  });
+
+  test("momus_work_dir_validation_rejects_absolute_path", () => {
+    expect(() => validateMomusWorkDir("/etc")).toThrow(/MOMUS_WORK_DIR invalid/);
+  });
+
+  test("momus_work_dir_validation_rejects_dotdot", () => {
+    expect(() => validateMomusWorkDir("../escape")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
+  });
+
+  test("momus_work_dir_validation_rejects_embedded_dotdot", () => {
+    expect(() => validateMomusWorkDir("foo/../etc")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
+  });
+
+  test("momus_work_dir_validation_rejects_bad_chars", () => {
+    expect(() => validateMomusWorkDir("foo;rm")).toThrow(
+      /MOMUS_WORK_DIR invalid/,
+    );
   });
 });

@@ -43,7 +43,14 @@ def prep_inputs(
     prompts_dir.mkdir(exist_ok=True)
     run_id = pr_meta.get("run_id", "A")
     for phase in ("phase1", "phase2", "phase3"):
-        rendered = render_phase_prompt(phase, config, run_id, work_dir_rel)
+        # Phase 1 needs the absolute work_dir so render_phase_prompt can
+        # inline `inputs/prior-threads.json` between fence markers when
+        # the prompt uses <<UNTRUSTED_PRIOR_THREADS_JSON>>. Other phases
+        # do not reference that placeholder and pass None (the default).
+        phase_work_dir = work_dir if phase == "phase1" else None
+        rendered = render_phase_prompt(
+            phase, config, run_id, work_dir_rel, work_dir=phase_work_dir
+        )
         (prompts_dir / f"{phase}.md").write_text(rendered)
 
     return inputs_dir

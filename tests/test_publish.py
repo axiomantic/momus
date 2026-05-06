@@ -578,3 +578,91 @@ def test_review_body_contains_attribution(monkeypatch):
     )
     assert "Powered by [Momus]" in body
     assert "deepseek/deepseek-v4-pro" in body
+
+
+# ---------------------------------------------------------------------------
+# Cost footer: per-PR LLM spend rendered from per-phase usage totals
+# ---------------------------------------------------------------------------
+
+
+def _usage(cost: float, in_t: int, out_t: int, model: str = "m") -> Any:
+    from momus.invoke_pi import PhaseUsage
+
+    return PhaseUsage(
+        cost_usd=cost,
+        input_tokens=in_t,
+        output_tokens=out_t,
+        cached_tokens=0,
+        model=model,
+    )
+
+
+def test_cost_footer_sums_phases_and_rounds_to_cents():
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+        phase_usages=[
+            ("phase1", _usage(0.0123, 100, 30, "deepseek/deepseek-v4-pro")),
+            ("phase2", _usage(0.4019, 50000, 1500, "deepseek/deepseek-v4-pro")),
+            ("phase3", _usage(0.0058, 8000, 200, "deepseek/deepseek-v4-pro")),
+        ],
+    )
+    # Total cost: 0.0123 + 0.4019 + 0.0058 = 0.42 (rounded to cents).
+    assert "Cost: $0.42" in body
+    # Tokens summed and comma-grouped.
+    assert "58,100 in / 1,730 out tokens" in body
+    assert "deepseek/deepseek-v4-pro" in body
+
+
+def test_cost_footer_omitted_when_no_usage():
+    # No phase_usages and no tokens -> footer line is suppressed entirely.
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+        phase_usages=[],
+    )
+    assert "Cost:" not in body
+
+
+def test_cost_footer_omitted_when_tokens_zero():
+    # Zero-token phases (e.g. all phases aborted before first call) -> no
+    # cost line; tokens-of-zero is the signal that pricing is unreliable.
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+        phase_usages=[("phase2", _usage(0.0, 0, 0))],
+    )
+    assert "Cost:" not in body
+
+
+def test_cost_footer_renders_subcent_as_zero():
+    # Sub-cent total still renders ($0.00) because tokens were consumed.
+    # User asked for cents-rounded explicitly; $0.00 is the honest answer.
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+        phase_usages=[("phase2", _usage(0.0019, 100, 20))],
+    )
+    assert "Cost: $0.00" in body
+    assert "100 in / 20 out tokens" in body
+
+
+def test_cost_footer_omits_model_when_blank():
+    # When LLM_MODEL env was unset (PhaseUsage.model == ""), don't render
+    # the trailing " - " separator that would leave an orphan dash.
+    body = publish_mod.render_review_body(
+        {"verdict": "COMMENT", "summary": "ok", "findings": []},
+        run_url="https://x/run/1",
+        run_id="A",
+        config=_minimal_config(),
+        phase_usages=[("phase2", _usage(0.10, 1000, 200, model=""))],
+    )
+    assert "Cost: $0.10 - 1,000 in / 200 out tokens_" in body

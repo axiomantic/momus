@@ -35,15 +35,41 @@ Phases 1, 2, 3 are LLM calls. Phase 4 is pure code.
 ## Harness
 
 [pi](https://github.com/badlogic/pi-mono) (`@mariozechner/pi-coding-agent`)
-runs each LLM phase. We supply a custom extension
-(`extensions/readonly-tools.ts`) that exposes:
+runs each LLM phase. The pi version is pinned via `package-lock.json`;
+install with `npm ci` rather than `npm install` to honor the pin.
 
-- `bash_ro` — shell with allowlisted binaries (`git`, `gh`, `cat`,
-  `head`, `tail`, `wc`, `find`, `rg`, `ls`); rejects shell metacharacters
-- `write_output` — restricted to writing under `outputs/`
+We supply a custom extension (`extensions/readonly-tools.ts`) that
+exposes:
 
-Plus pi's built-in `read`, `grep`, `find`, `ls` (read-only). Built-in
-`bash`, `write`, `edit` are excluded via `--tools` allowlist.
+- `bash_ro`: shell with allowlisted binaries (`git`, `cat`, `head`,
+  `tail`, `wc`, `find`, `rg`, `ls`); rejects shell metacharacters and
+  walks `git` argv to keep paths inside the worktree. `gh` is invoked
+  from Python pre-pi (`fetch_priors.py`); the LLM phases never need
+  it, so it was removed from the allowlist in v1.1.0.
+- `write_output`: restricted to writing under `outputs/`, with realpath
+  containment so symlink swaps cannot redirect writes.
+- `read_repo` / `grep_repo` / `find_repo` / `ls_repo`: cwd-contained
+  replacements for pi's built-in read/grep/find/ls. Pi's built-ins are
+  excluded via the `--tools` allowlist so the LLM cannot escape the
+  worktree.
+
+Built-in `bash`, `write`, `edit` are also excluded via `--tools`.
+
+## Environment scoping
+
+The bot runs pi in a process with a **default-deny env allowlist**:
+only a small set of variables (`HOME`, `PATH`, `TMPDIR`, `LANG`,
+`LC_*`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`,
+`LLM_API_KEY`) is forwarded to the pi child. Anything else on the
+runner environment, including `GITHUB_TOKEN` and `GITHUB_REPOSITORY`,
+is scrubbed before the LLM phases start.
+
+If your fork or extension needs a custom env var inside pi, set
+`MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2` on the workflow job. Each name
+is added to the allowlist and forwarded as-is. **This is an opt-in
+escape hatch; review what you pass through.** It bypasses the hardening
+that prevents prompt-injected pi runs from reading credentials from
+sibling env vars.
 
 ## Configuration
 
@@ -64,11 +90,10 @@ provider-specific env vars.
 
 ## Triggers
 
-- `pull_request` opened / synchronize / reopened — full review
-- `issue_comment` body starting with the configured trigger command
-  (default `/ai-review`) OR containing the configured @-mention (e.g.
-  `@your-org-momus[bot]`) — re-review with prior-findings continuity
-- `workflow_dispatch` — manual run
+- `pull_request` opened / reopened: full review on first PR open
+- `workflow_dispatch`: manual re-review (provide `pr_number` input)
 
-Both `trigger_command` and `trigger_mention` are inputs on the reusable
-workflow; see [SETUP.md](SETUP.md#3-add-the-workflow).
+Re-reviews on push are intentionally NOT wired up: each run consumes
+LLM provider quota, and pushing in rapid succession during fix cycles
+will burn that quota fast. To re-review after pushing fixes, dispatch
+the workflow manually.

@@ -1,0 +1,17 @@
+# pi-coding-agent v0.72.1 — top-level exports relevant to V1 (extension factory + tool registration shape)
+# Source: /Users/eek/.bun/install/global/node_modules/@mariozechner/pi-coding-agent/dist/index.d.ts
+# Generated for V1-Run FALLBACK (P3-I2): node -e require() unavailable because pi is ESM-only
+# (No "exports" main defined). Snapshot lifted from index.d.ts re-exports of ./core/extensions/index.js.
+
+# Types
+ExtensionAPI
+ExtensionContext
+ExtensionFactory          # = (pi: ExtensionAPI) => void | Promise<void>
+ToolDefinition            # { name, label, description, parameters: TSchema, execute(toolCallId, params, signal, onUpdate, ctx), ... }
+ProviderConfig
+ProviderModelConfig
+
+# Functions
+defineTool
+wrapRegisteredTool
+wrapRegisteredTools

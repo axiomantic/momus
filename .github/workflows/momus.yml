@@ -7,9 +7,7 @@ name: Momus self-review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]
-  issue_comment:
-    types: [created]
+    types: [opened, reopened]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -19,15 +17,6 @@ on:
 
 jobs:
   review:
-    # Skip comment events that are not on a PR or that do not contain the
-    # re-review trigger. Without this gate, every comment on every issue
-    # would burn a runner minute.
-    if: |
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request != null &&
-       contains(github.event.comment.body, '/ai-review'))
     permissions:
       contents: read
       pull-requests: write
@@ -53,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr_number }}"
+          PR_NUMBER="${{ github.event.pull_request.number || github.event.inputs.pr_number }}"
           HEAD_SHA=$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" --jq .head.sha)
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"

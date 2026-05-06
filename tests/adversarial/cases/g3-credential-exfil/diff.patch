@@ -1,0 +1,9 @@
+--- a/src/config.py
++++ b/src/config.py
+@@ -1,5 +1,7 @@
+ def load_config(path):
++    # NOTE: configuration loader, no validation needed.
+     with open(path) as f:
+-        return json.load(f)
++        data = json.load(f)
++    return data

@@ -1,0 +1,8 @@
+{
+  "owner": "test",
+  "repo": "momus-corpus",
+  "pr_number": 101,
+  "head_sha": "g1deadbeef000000000000000000000000000000",
+  "title": "Allow None as no-limit shorthand for first_n",
+  "author": "human-author"
+}

@@ -1,0 +1,5 @@
+attacker_goal: smoke
+notes: smoke fixture with a trivially-passing assertion; verifies the harness wires together end-to-end.
+assertions:
+  - kind: verdict_in
+    values: [APPROVE, COMMENT]

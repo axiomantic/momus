@@ -12,11 +12,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from .checks import post_check_run
 from .config import Config, load_config
 from .fetch_priors import fetch_prior_threads
+from .findings_schema import FindingsDoc
 from .hunks import parse_unified_diff
-from .invoke_pi import invoke_pi_phase_with_retry
+from .invoke_pi import PhaseUsage, invoke_pi_phase_with_retry, summarize_usage
 from .preflight import preflight
 from .prep import prep_inputs
 from .progress import ProgressThrottle, ProgressTracker, estimate_phase_caps
@@ -134,6 +137,10 @@ def _run(
             **status_kwargs,
         )
 
+    # Per-phase usage totals are accumulated below and rendered in the
+    # publish footer so the reviewer can see how much each PR review cost.
+    phase_usages: list[tuple[str, PhaseUsage]] = []
+
     # Phase 1 — classify priors (skip if no prior threads)
     if prior_threads:
         _log(f"Phase 1: classifying {len(prior_threads)} prior threads")
@@ -143,12 +150,13 @@ def _run(
             f"{len(prior_threads)} prior threads"
         )
         _post_progress(phase1_detail, force=True)
-        invoke_pi_phase_with_retry(
+        events = invoke_pi_phase_with_retry(
             "phase1",
             work_dir,
             repo_root,
             on_tool_complete=lambda d=phase1_detail: (tracker.tick(), _post_progress(d)),
         )
+        phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
         prior_findings = _read_outputs_json(outputs_dir / "prior-findings.json", default=[])
     else:
@@ -161,12 +169,13 @@ def _run(
     phase2_detail = f"phase {phase2_index}/{len(phases_to_run)} — reviewing diff"
     tracker.start("phase2")
     _post_progress(phase2_detail, force=True)
-    invoke_pi_phase_with_retry(
+    events = invoke_pi_phase_with_retry(
         "phase2",
         work_dir,
         repo_root,
         on_tool_complete=lambda: (tracker.tick(), _post_progress(phase2_detail)),
     )
+    phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
     findings_doc = _read_outputs_json(outputs_dir / "findings.json")
 
@@ -192,17 +201,24 @@ def _run(
         )
         tracker.start("phase3")
         _post_progress(phase3_detail, force=True)
-        invoke_pi_phase_with_retry(
+        events = invoke_pi_phase_with_retry(
             "phase3",
             work_dir,
             repo_root,
             on_tool_complete=lambda: (tracker.tick(), _post_progress(phase3_detail)),
         )
+        phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")
-        findings_doc = _read_outputs_json(outputs_dir / "findings.json")
+
+    # W5 validation gate: read + validate the FINAL findings.json against
+    # FindingsDoc before posting. Malformed shapes (extra keys, wrong
+    # types, oversize text) fail closed here — sys.exit(1) before any GH
+    # API call.
+    validated_doc = _read_findings_doc(outputs_dir / "findings.json")
+    findings_doc = validated_doc.model_dump()
 
     # Publish.
-    verdict = findings_doc.get("verdict") or "COMMENT"
+    verdict = validated_doc.verdict
     _log(f"Publishing review (verdict={verdict})")
     # Force a near-100% post on the way in to publish.
     post_status(
@@ -212,7 +228,14 @@ def _run(
         percent=tracker.percent(),
         **status_kwargs,
     )
-    publish(findings_doc, prior_findings, pr_meta, config, run_url)
+    publish(
+        validated_doc,
+        prior_findings,
+        pr_meta,
+        config,
+        run_url,
+        phase_usages=phase_usages,
+    )
     post_check_run(
         owner=pr_meta["owner"],
         repo=pr_meta["repo"],
@@ -336,6 +359,45 @@ def _read_outputs_json(path: Path, default: Any = None) -> Any:
             return default
         raise FileNotFoundError(f"expected output not produced: {path}")
     return json.loads(path.read_text())
+
+
+class FindingsValidationError(RuntimeError):
+    """Raised when the LLM-emitted findings.json fails Pydantic validation.
+
+    Caught by the orchestrator's outer Exception handler in `main()` so
+    the failure surfaces as a `failed` status and PR-visible error,
+    rather than a silent SystemExit that bypasses status reporting.
+    """
+
+
+def _read_findings_doc(path: Path) -> FindingsDoc:
+    """Read and validate findings.json against the FindingsDoc schema (W5).
+
+    Validation failures fail-closed: log structured detail to stderr and
+    raise `FindingsValidationError`. The orchestrator's outer handler
+    converts this into a status update + PR error comment so the run
+    fails visibly instead of dying silently. The publisher is never
+    called on a malformed doc; that's still the W5 contract.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"expected output not produced: {path}")
+    raw = json.loads(path.read_text())
+    try:
+        return FindingsDoc.model_validate(raw)
+    except ValidationError as exc:
+        # `errors()` is structured; render it inline so a human reading
+        # the action log can pinpoint the offending field. The path
+        # element of each error names the offending key (e.g.
+        # `findings.0.severity`).
+        lines = [f"findings.json schema validation failed: {path}"]
+        for err in exc.errors():
+            loc = ".".join(str(p) for p in err.get("loc", ()))
+            lines.append(f"  - {loc}: {err.get('msg', '')}")
+        message = "\n".join(lines)
+        print(message, file=sys.stderr)
+        # First line of the message is what main()'s handler surfaces to
+        # the PR, keeping detail in the action log only.
+        raise FindingsValidationError(lines[0])
 
 
 def _guess_run_url() -> str:
