@@ -9,6 +9,8 @@ from pathlib import Path
 from .config import Config
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+EMPHASIS_DIR = PROMPTS_DIR / "emphasis"
+_REPO_EMPHASIS_FALLBACK = "(none configured for this repo)"
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +186,7 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
 
     return {
         "WORK_DIR": str(work_dir_rel),
-        "REPO_EMPHASIS": review.repo_emphasis or "(none configured for this repo)",
+        "REPO_EMPHASIS": _compose_repo_emphasis(review.emphasis_modules, review.repo_emphasis),
         "CALIBRATION_PROCEDURE": calibration_procedure,
         "BLOCKING_SEVERITIES": blocking_str,
         "NIT_SCALE_LINE": nit_scale_line,
@@ -197,6 +199,28 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
         "FIRST_REVIEW_APPROVE_RULE": first_review_rule,
         "ID_SCHEME": id_scheme,
     }
+
+
+def _compose_repo_emphasis(modules: list[str], free_form: str) -> str:
+    """Build the ``<<REPO_EMPHASIS>>`` substitution body.
+
+    Module bodies (read from ``momus/prompts/emphasis/<name>.md``) are
+    concatenated with double-newlines in declared order, then the
+    free-form ``review.repo_emphasis`` string is appended (also after a
+    blank line) when non-empty. If both inputs are empty, the historical
+    ``(none configured for this repo)`` placeholder is returned to
+    preserve behavior for zero-config repos.
+    """
+    blocks: list[str] = []
+    for name in modules:
+        path = EMPHASIS_DIR / f"{name}.md"
+        blocks.append(path.read_text(encoding="utf-8").rstrip())
+    free_form = free_form.strip()
+    if free_form:
+        blocks.append(free_form)
+    if not blocks:
+        return _REPO_EMPHASIS_FALLBACK
+    return "\n\n".join(blocks)
 
 
 def _find_unsubstituted(text: str) -> list[str]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,11 @@ DEFAULTS_PATH = Path(__file__).resolve().parent / "config-defaults.yaml"
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "low", "nit"}
 ALLOWED_RUN_ID_SCHEMES = {"alpha", "numeric", "off"}
 ALLOWED_FIRST_REVIEW_POLICIES = {"never", "if_no_findings", "if_no_blocking"}
+# Names of emphasis-module files shipped under momus/prompts/emphasis/.
+# When a repo opts in via ``review.emphasis_modules``, the renderer
+# inlines each module's body into ``<<REPO_EMPHASIS>>`` ahead of the
+# free-form ``review.repo_emphasis`` string.
+ALLOWED_EMPHASIS_MODULES = {"security", "dead_code", "quality_checklist", "test_quality"}
 
 
 @dataclass
@@ -23,6 +28,10 @@ class ReviewConfig:
     noteworthy_max: int
     run_id_scheme: str
     repo_emphasis: str
+    # Default empty list keeps existing test fixtures and downstream
+    # ReviewConfig constructions backward-compatible. New module library
+    # is opt-in via .momus.yaml.
+    emphasis_modules: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -129,6 +138,14 @@ def _to_config(data: dict[str, Any]) -> Config:
             f"review.run_id_scheme: must be one of {ALLOWED_RUN_ID_SCHEMES}, got {scheme!r}"
         )
 
+    emphasis_modules = list(review.get("emphasis_modules", []))
+    bad_modules = [m for m in emphasis_modules if m not in ALLOWED_EMPHASIS_MODULES]
+    if bad_modules:
+        raise ValueError(
+            f"review.emphasis_modules: unknown module(s) {bad_modules}. "
+            f"Allowed: {sorted(ALLOWED_EMPHASIS_MODULES)}"
+        )
+
     policy = post.get("first_review_approve_policy")
     if policy not in ALLOWED_FIRST_REVIEW_POLICIES:
         raise ValueError(
@@ -145,6 +162,7 @@ def _to_config(data: dict[str, Any]) -> Config:
             noteworthy_max=int(review.get("noteworthy_max", 3)),
             run_id_scheme=scheme,
             repo_emphasis=str(review.get("repo_emphasis", "")),
+            emphasis_modules=emphasis_modules,
         ),
         conventions=ConventionsConfig(
             files=list(conventions.get("files", [])),

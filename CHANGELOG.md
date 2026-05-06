@@ -4,6 +4,36 @@ All notable changes to momus are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-05-06
+
+Composable review emphasis and sharper green-mirage discipline in
+the review prompts. Documentation site restructured around the
+Diataxis framework.
+
+### Added
+
+- **Composable emphasis modules**: new `review.emphasis_modules`
+  config knob accepts a list of named modules from
+  `momus/prompts/emphasis/`. Ships with `security`, `dead_code`,
+  `quality_checklist`, and `test_quality`. Modules compose with
+  free-form repo emphasis; unknown names fail validation at
+  config load.
+- **Diataxis-structured docs site**: new tutorial, how-to (8
+  recipes), reference (5 pages), explanation (4 pages), and
+  contributing (4 pages) quadrants under `docs/`. Root
+  `CONTRIBUTING.md` points to the contributing quadrant.
+
+### Changed
+
+- **Phase 2 review prompt** now requires a verifying observation
+  for every finding and uses an expanded green-mirage taxonomy.
+- **Phase 3 verify prompt** drops findings whose grounding
+  evidence does not survive verification, instead of softening
+  them.
+- **Docs site** rewritten: `docs/index.md` is now a trust pitch
+  with quadrant wayfinding; `SETUP.md` is a thin pointer to the
+  docs site; `docs/usage.md` removed (content migrated).
+
 ## [1.1.0] - 2026-05-05
 
 Injection hardening release. Closes the prompt-injection attack

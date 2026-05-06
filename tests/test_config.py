@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from momus.config import load_config
 
 
@@ -66,3 +67,63 @@ checks:
     cfg = load_config(tmp_path)
     assert cfg.checks.enabled is True
     assert cfg.checks.name == "Acme Review"
+
+
+def test_emphasis_modules_default_empty(tmp_path: Path) -> None:
+    """Default config must expose ``emphasis_modules`` as an empty list so
+    that pre-existing repos with no opt-in continue to render the prompt
+    using only the free-form ``repo_emphasis`` string.
+    """
+    cfg = load_config(tmp_path)
+    assert cfg.review.emphasis_modules == []
+
+
+def test_emphasis_modules_load_known_names(tmp_path: Path) -> None:
+    """Known module names must load as a list preserving order. The four
+    valid module names are ``security``, ``dead_code``,
+    ``quality_checklist``, and ``test_quality``.
+    """
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: [security, dead_code]
+""",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.review.emphasis_modules == ["security", "dead_code"]
+
+
+def test_emphasis_modules_unknown_name_raises(tmp_path: Path) -> None:
+    """Unknown module names must raise a clear ``ValueError`` naming the
+    offending entry. Validation happens at config load time so that typos
+    fail loudly on startup rather than silently rendering a degraded
+    prompt.
+    """
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: [bogus_name]
+""",
+    )
+    with pytest.raises(ValueError, match="bogus_name"):
+        load_config(tmp_path)
+
+
+def test_emphasis_modules_all_four_known(tmp_path: Path) -> None:
+    """All four documented module names must validate as a complete set."""
+    _write_yaml(
+        tmp_path / ".momus.yaml",
+        """
+review:
+  emphasis_modules: [security, dead_code, quality_checklist, test_quality]
+""",
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.review.emphasis_modules == [
+        "security",
+        "dead_code",
+        "quality_checklist",
+        "test_quality",
+    ]

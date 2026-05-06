@@ -114,6 +114,13 @@ the truth is your job.
    - Check whether tests exercise the new behavior. Test files that
      don't actually cover the new code are themselves a finding.
    - Verify any claim in the PR title or body against the actual diff.
+   - Ground every finding. The `message` field MUST contain BOTH (a)
+     the hypothesis (what's wrong) AND (b) the verifying observation
+     that grounds it. The verifying observation MUST be one of two
+     forms: (1) a quoted line from the cited file (preferred), or
+     (2) a grep result with the matched line. A bare assertion that
+     you "read the file" is NOT grounding. Findings that assert
+     without grounding will be DROPPED in phase 3.
 
 4. Apply `<<WORK_DIR>>/inputs/prior-findings.json` discipline:
    - For each `PENDING` prior finding, determine whether the new commit
@@ -172,6 +179,20 @@ One of: `security`, `bug`, `performance`, `quality`, `tests`, `standards`.
   come from a file you actually read in this run.
 <<EMIT_NITS_ANTIPATTERN>>
 
+### Green-mirage patterns to flag (`tests` category)
+
+Tests that pass without verifying behavior manufacture confidence. Flag
+any of these four patterns when introduced or modified by this PR:
+
+- assertion-free tests: the test body has no `assert`/`expect`/
+  `should`/`require` call.
+- mocks-of-the-thing-under-test: the test mocks the very function or
+  method whose behavior it claims to verify.
+- tautological assertions: `assert x == x`, or asserting against a
+  literal the test itself just constructed.
+- snapshot-without-comparison: snapshot written but never compared
+  against a stored baseline, or always-overwritten on every run.
+
 ## Output
 
 Cap: at most <<MAX_FINDINGS>> findings per run. Consolidate redundant
@@ -200,7 +221,7 @@ shown in the Output contract above). Strict shape:
       "category": "bug",
       "blocking": true,
       "title": "One-line headline.",
-      "message": "1-3 sentence explanation. Cite specifics from the code.",
+      "message": "1-3 sentence explanation including a quoted line or grep result. Example: 'foo() does not check bounds (line 42: `buf[idx] = x`); idx is unvalidated.'",
       "suggestion": "Optional. Code only. Wrapped in a ```suggestion fence by the publisher."<<CALIBRATION_FIELD>>
     }
   ],

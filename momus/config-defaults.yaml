@@ -41,6 +41,19 @@ review:
   # firmware, treat any panic/unwrap as critical"). Empty by default.
   repo_emphasis: ""
 
+  # Composable emphasis-module library. Each entry is the basename of a
+  # file under `momus/prompts/emphasis/` that gets inlined into the phase
+  # 2 prompt's <<REPO_EMPHASIS>> block. Modules compose ADDITIVELY with
+  # `repo_emphasis` above: modules render first (in declared order),
+  # then the free-form string is appended. Empty by default for backward
+  # compatibility. Valid values:
+  #   security          — OWASP-style focus (injection, traversal, secrets, authz, crypto)
+  #   dead_code         — unreferenced symbols, unreachable branches, dead exports
+  #   quality_checklist — no `any` types, no blanket try/except, resource leaks, etc.
+  #   test_quality      — green-mirage taxonomy (assertion-free, mocks-of-target, tautological,
+  #                       snapshot-without-comparison)
+  emphasis_modules: []
+
 conventions:
   # Files concatenated into `inputs/conventions.md` and presented to the
   # model as repo conventions that override prompt defaults. Files that
