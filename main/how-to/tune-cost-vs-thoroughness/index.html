@@ -10,25 +10,31 @@
       
       
       
+        <link rel="canonical" href="https://axiomantic.github.io/momus/main/how-to/tune-cost-vs-thoroughness/">
       
+      
+        <link rel="prev" href="../use-different-llm-provider/">
+      
+      
+        <link rel="next" href="../debug-a-review/">
       
       
         
       
       
-      <link rel="icon" href="/momus/main/assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Momus</title>
+        <title>Tune cost vs thoroughness - Momus</title>
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="/momus/main/assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -47,9 +53,9 @@
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL("/momus/main",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -73,6 +79,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#tune-cost-vs-thoroughness" class="md-skip">
+          Skip to content
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -89,7 +100,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="/momus/main/." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -109,7 +120,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              
+              Tune cost vs thoroughness
             
           </span>
         </div>
@@ -227,7 +238,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="/momus/main/." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -257,7 +268,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -338,7 +349,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/tutorial/first-review/" class="md-nav__link">
+      <a href="../../tutorial/first-review/" class="md-nav__link">
         
   
   
@@ -370,8 +381,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -382,13 +395,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -409,7 +420,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -427,7 +438,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-blocking-severities/" class="md-nav__link">
+      <a href="../configure-blocking-severities/" class="md-nav__link">
         
   
   
@@ -455,7 +466,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/add-convention-files/" class="md-nav__link">
+      <a href="../add-convention-files/" class="md-nav__link">
         
   
   
@@ -483,7 +494,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-emphasis/" class="md-nav__link">
+      <a href="../configure-emphasis/" class="md-nav__link">
         
   
   
@@ -511,7 +522,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/set-up-github-app/" class="md-nav__link">
+      <a href="../set-up-github-app/" class="md-nav__link">
         
   
   
@@ -539,7 +550,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/use-different-llm-provider/" class="md-nav__link">
+      <a href="../use-different-llm-provider/" class="md-nav__link">
         
   
   
@@ -564,10 +575,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="/momus/main/how-to/tune-cost-vs-thoroughness/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tune cost vs thoroughness
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -583,6 +621,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cap-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cap findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disable-nits-entirely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable nits entirely
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-auto-skipped-on-first-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 (auto-skipped on first review)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disable-the-verify-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable the verify phase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-a-smaller-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose a smaller model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combining-levers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining levers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -595,7 +730,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/debug-a-review/" class="md-nav__link">
+      <a href="../debug-a-review/" class="md-nav__link">
         
   
   
@@ -623,7 +758,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/extend-env-passthrough/" class="md-nav__link">
+      <a href="../extend-env-passthrough/" class="md-nav__link">
         
   
   
@@ -712,7 +847,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/action-inputs/" class="md-nav__link">
+      <a href="../../reference/action-inputs/" class="md-nav__link">
         
   
   
@@ -740,7 +875,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/config-schema/" class="md-nav__link">
+      <a href="../../reference/config-schema/" class="md-nav__link">
         
   
   
@@ -768,7 +903,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/prompt-tokens/" class="md-nav__link">
+      <a href="../../reference/prompt-tokens/" class="md-nav__link">
         
   
   
@@ -796,7 +931,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/emphasis-modules/" class="md-nav__link">
+      <a href="../../reference/emphasis-modules/" class="md-nav__link">
         
   
   
@@ -824,7 +959,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/cli/" class="md-nav__link">
+      <a href="../../reference/cli/" class="md-nav__link">
         
   
   
@@ -913,7 +1048,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/four-phase-pipeline/" class="md-nav__link">
+      <a href="../../explanation/four-phase-pipeline/" class="md-nav__link">
         
   
   
@@ -941,7 +1076,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/review-philosophy/" class="md-nav__link">
+      <a href="../../explanation/review-philosophy/" class="md-nav__link">
         
   
   
@@ -969,7 +1104,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/threat-model/" class="md-nav__link">
+      <a href="../../explanation/threat-model/" class="md-nav__link">
         
   
   
@@ -997,7 +1132,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/adversarial-corpus/" class="md-nav__link">
+      <a href="../../explanation/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1086,7 +1221,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/dev-loop/" class="md-nav__link">
+      <a href="../../contributing/dev-loop/" class="md-nav__link">
         
   
   
@@ -1114,7 +1249,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/adversarial-corpus/" class="md-nav__link">
+      <a href="../../contributing/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1142,7 +1277,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/modifying-prompts/" class="md-nav__link">
+      <a href="../../contributing/modifying-prompts/" class="md-nav__link">
         
   
   
@@ -1170,7 +1305,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/release-process/" class="md-nav__link">
+      <a href="../../contributing/release-process/" class="md-nav__link">
         
   
   
@@ -1215,6 +1350,93 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cap-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cap findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disable-nits-entirely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable nits entirely
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-auto-skipped-on-first-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 (auto-skipped on first review)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disable-the-verify-phase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable the verify phase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-a-smaller-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose a smaller model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combining-levers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Combining levers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1227,8 +1449,90 @@
               
               <article class="md-content__inner md-typeset">
                 
-  <h1>404 - Not found</h1>
+                  
 
+
+  
+  
+
+
+<h1 id="tune-cost-vs-thoroughness">Tune cost vs thoroughness<a class="headerlink" href="#tune-cost-vs-thoroughness" title="Permanent link">&para;</a></h1>
+<p>Each Momus run costs LLM tokens. A typical PR review is ~30k–80k input + ~3k output, but a sprawling diff with deep call-graph walks can push higher. You have several levers; each trades cost for coverage. None is universally correct.</p>
+<p>This page lays out the levers and when each is appropriate.</p>
+<h2 id="cap-findings">Cap findings<a class="headerlink" href="#cap-findings" title="Permanent link">&para;</a></h2>
+<p><a href="../../reference/config-schema/#review-max-findings"><code>review.max_findings</code></a> is a hard ceiling enforced at the publisher.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">max_findings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p>Lower caps push the model to consolidate redundant findings rather than emit them all. The cap does not reduce phase 2's cost (the model still walks the diff), but it does shrink the JSON output and reduces phase 3's verify load.</p>
+<p>Use when: PRs in this repo tend to surface long lists of similar nits; you want signal density rather than volume.</p>
+<h2 id="disable-nits-entirely">Disable nits entirely<a class="headerlink" href="#disable-nits-entirely" title="Permanent link">&para;</a></h2>
+<p><a href="../../reference/config-schema/#review-emit-nits"><code>review.emit_nits</code></a> controls whether the severity scale presented to the model includes <code>nit</code> at all.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">emit_nits</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<p>This is stronger than just removing <code>nit</code> from <code>blocking_severities</code>: when <code>emit_nits: false</code>, the prompt instructs the model not to emit nits in the first place. Saves tokens; eliminates the noisiest class of finding outright.</p>
+<p>Use when: nits are not actionable in this repo; reviewers find them clutter; CI/lint already covers style.</p>
+<h2 id="phase-1-auto-skipped-on-first-review">Phase 1 (auto-skipped on first review)<a class="headerlink" href="#phase-1-auto-skipped-on-first-review" title="Permanent link">&para;</a></h2>
+<p>You cannot turn phase 1 off via config. It runs only on re-reviews (<code>event: issue_comment</code> or <code>workflow_dispatch</code>); first reviews of a PR have no prior threads to classify, so the orchestrator skips it. See <a href="../../reference/action-inputs/#event">Reference: action inputs</a> and <a href="../../explanation/four-phase-pipeline/#phase-1-plan">Phase 1: Plan</a>.</p>
+<p>If you want to avoid phase 1's cost on a re-review, the only option is not to trigger a re-review. Re-reviews on push are intentionally not wired up; they only run on manual dispatch or trigger comment.</p>
+<h2 id="disable-the-verify-phase">Disable the verify phase<a class="headerlink" href="#disable-the-verify-phase" title="Permanent link">&para;</a></h2>
+<p><a href="../../reference/config-schema/#verify-enabled"><code>verify.enabled</code></a> gates phase 3.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">verify</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</code></pre></div>
+<p>This is the single largest cost cut on the LLM side: you eliminate one full LLM pass per review. <strong>Read the tradeoff before flipping this.</strong></p>
+<p>Phase 3 is what catches phase 2's hallucinations. Without it, every plausible-sounding-but-wrong finding phase 2 emits goes straight to GitHub. The deterministic preflight (file-exists, line-in-range, on-hunk citation) still runs and drops structural errors, but semantic errors (a function that is not actually racy, a check that is not actually missing) cannot be caught.</p>
+<p>See <a href="../../explanation/review-philosophy/#verify-cannot-promote">Verify cannot promote</a> for why phase 3 is shaped the way it is.</p>
+<p>Use when: cost is a hard constraint and you accept the noise floor will rise. Re-enable as soon as you can.</p>
+<h2 id="choose-a-smaller-model">Choose a smaller model<a class="headerlink" href="#choose-a-smaller-model" title="Permanent link">&para;</a></h2>
+<p>The cheapest lever per quality unit. <a href="../../reference/config-schema/#provider-model"><code>provider.model</code></a> overrides the workflow default per repo.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">provider</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deepseek/deepseek-v4-pro</span>
+</code></pre></div>
+<p>A faster, cheaper model on a low-traffic repo will produce shallower findings but at a fraction of the cost. A flagship model on a high-stakes repo (security-critical, payments, infra) is the opposite trade.</p>
+<p>Use when: you have repos with different cost profiles. Set the workflow default to the most common case; override per repo where the trade differs.</p>
+<h2 id="combining-levers">Combining levers<a class="headerlink" href="#combining-levers" title="Permanent link">&para;</a></h2>
+<p>A reasonable cost-conscious profile for a low-stakes repo:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">emit_nits</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">max_findings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nt">verify</span><span class="p">:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">   </span><span class="c1"># keep the safety net</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nt">provider</span><span class="p">:</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deepseek/deepseek-v4-pro</span>
+</code></pre></div>
+<p>A maximum-thoroughness profile for a security-critical repo:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">emit_nits</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">max_findings</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">emphasis_modules</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">security</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">quality_checklist</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">verify</span><span class="p">:</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="nt">provider</span><span class="p">:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-sonnet-4-6</span>
+</code></pre></div>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../reference/config-schema/#review">Reference: <code>review</code> config group</a></li>
+<li><a href="../../reference/config-schema/#verify-enabled">Reference: <code>verify.enabled</code></a></li>
+<li><a href="../../reference/config-schema/#provider-model">Reference: <code>provider.model</code></a></li>
+<li><a href="../../explanation/review-philosophy/">Explanation: review philosophy</a></li>
+<li><a href="../configure-emphasis/">How-to: configure emphasis</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
               </article>
             </div>
           
@@ -1271,10 +1575,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "/momus/main", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "/momus/main/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="/momus/main/assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

@@ -10,25 +10,31 @@
       
       
       
+        <link rel="canonical" href="https://axiomantic.github.io/momus/main/how-to/debug-a-review/">
       
+      
+        <link rel="prev" href="../tune-cost-vs-thoroughness/">
+      
+      
+        <link rel="next" href="../extend-env-passthrough/">
       
       
         
       
       
-      <link rel="icon" href="/momus/main/assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Momus</title>
+        <title>Debug a review - Momus</title>
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="/momus/main/assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -47,9 +53,9 @@
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL("/momus/main",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -73,6 +79,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#debug-a-momus-review" class="md-skip">
+          Skip to content
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -89,7 +100,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="/momus/main/." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -109,7 +120,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              
+              Debug a review
             
           </span>
         </div>
@@ -227,7 +238,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="/momus/main/." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -257,7 +268,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -338,7 +349,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/tutorial/first-review/" class="md-nav__link">
+      <a href="../../tutorial/first-review/" class="md-nav__link">
         
   
   
@@ -370,8 +381,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -382,13 +395,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -409,7 +420,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -427,7 +438,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-blocking-severities/" class="md-nav__link">
+      <a href="../configure-blocking-severities/" class="md-nav__link">
         
   
   
@@ -455,7 +466,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/add-convention-files/" class="md-nav__link">
+      <a href="../add-convention-files/" class="md-nav__link">
         
   
   
@@ -483,7 +494,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-emphasis/" class="md-nav__link">
+      <a href="../configure-emphasis/" class="md-nav__link">
         
   
   
@@ -511,7 +522,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/set-up-github-app/" class="md-nav__link">
+      <a href="../set-up-github-app/" class="md-nav__link">
         
   
   
@@ -539,7 +550,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/use-different-llm-provider/" class="md-nav__link">
+      <a href="../use-different-llm-provider/" class="md-nav__link">
         
   
   
@@ -567,7 +578,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/tune-cost-vs-thoroughness/" class="md-nav__link">
+      <a href="../tune-cost-vs-thoroughness/" class="md-nav__link">
         
   
   
@@ -592,10 +603,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="/momus/main/how-to/debug-a-review/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debug a review
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -611,6 +649,153 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-outputs-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The outputs/ directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-running-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-running locally
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common failure modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common failure modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#provider-rate-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider rate limit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-returns-malformed-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model returns malformed JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unsubstituted-prompt-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unsubstituted prompt token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#empty-findings-list-no-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Empty findings list, no APPROVE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approve-downgraded-to-comment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        APPROVE downgraded to COMMENT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-file-a-bug-vs-adjust-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to file a bug vs adjust config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -623,7 +808,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/extend-env-passthrough/" class="md-nav__link">
+      <a href="../extend-env-passthrough/" class="md-nav__link">
         
   
   
@@ -712,7 +897,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/action-inputs/" class="md-nav__link">
+      <a href="../../reference/action-inputs/" class="md-nav__link">
         
   
   
@@ -740,7 +925,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/config-schema/" class="md-nav__link">
+      <a href="../../reference/config-schema/" class="md-nav__link">
         
   
   
@@ -768,7 +953,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/prompt-tokens/" class="md-nav__link">
+      <a href="../../reference/prompt-tokens/" class="md-nav__link">
         
   
   
@@ -796,7 +981,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/emphasis-modules/" class="md-nav__link">
+      <a href="../../reference/emphasis-modules/" class="md-nav__link">
         
   
   
@@ -824,7 +1009,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/cli/" class="md-nav__link">
+      <a href="../../reference/cli/" class="md-nav__link">
         
   
   
@@ -913,7 +1098,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/four-phase-pipeline/" class="md-nav__link">
+      <a href="../../explanation/four-phase-pipeline/" class="md-nav__link">
         
   
   
@@ -941,7 +1126,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/review-philosophy/" class="md-nav__link">
+      <a href="../../explanation/review-philosophy/" class="md-nav__link">
         
   
   
@@ -969,7 +1154,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/threat-model/" class="md-nav__link">
+      <a href="../../explanation/threat-model/" class="md-nav__link">
         
   
   
@@ -997,7 +1182,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/adversarial-corpus/" class="md-nav__link">
+      <a href="../../explanation/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1086,7 +1271,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/dev-loop/" class="md-nav__link">
+      <a href="../../contributing/dev-loop/" class="md-nav__link">
         
   
   
@@ -1114,7 +1299,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/adversarial-corpus/" class="md-nav__link">
+      <a href="../../contributing/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1142,7 +1327,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/modifying-prompts/" class="md-nav__link">
+      <a href="../../contributing/modifying-prompts/" class="md-nav__link">
         
   
   
@@ -1170,7 +1355,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/release-process/" class="md-nav__link">
+      <a href="../../contributing/release-process/" class="md-nav__link">
         
   
   
@@ -1215,6 +1400,143 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-outputs-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The outputs/ directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-audit-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The audit log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-running-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-running locally
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common failure modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common failure modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#provider-rate-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider rate limit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-returns-malformed-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model returns malformed JSON
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unsubstituted-prompt-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unsubstituted prompt token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#empty-findings-list-no-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Empty findings list, no APPROVE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#approve-downgraded-to-comment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        APPROVE downgraded to COMMENT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-file-a-bug-vs-adjust-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to file a bug vs adjust config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1227,8 +1549,111 @@
               
               <article class="md-content__inner md-typeset">
                 
-  <h1>404 - Not found</h1>
+                  
 
+
+  
+  
+
+
+<h1 id="debug-a-momus-review">Debug a Momus review<a class="headerlink" href="#debug-a-momus-review" title="Permanent link">&para;</a></h1>
+<p>You looked at a review and something is off: a finding you do not understand, a verdict that surprised you, a phase that failed, a missing comment. This page is the trail of breadcrumbs.</p>
+<p>Start with the artifacts. The action uploads <code>inputs/</code> and <code>outputs/</code> from <code>--work-dir</code> as a workflow artifact named <code>momus-&lt;pr&gt;-&lt;run_id&gt;</code> (7-day retention). Download it from the Actions run page.</p>
+<h2 id="the-outputs-directory">The <code>outputs/</code> directory<a class="headerlink" href="#the-outputs-directory" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>What it contains</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>findings.json</code></td>
+<td>The final, schema-validated findings document the publisher acted on</td>
+</tr>
+<tr>
+<td><code>preflight-log.json</code></td>
+<td>What the deterministic preflight (between phases 2 and 3) dropped or demoted</td>
+</tr>
+<tr>
+<td><code>audit-log.json</code></td>
+<td>What phase 3 dropped, demoted, consolidated, or stripped (only present when <code>verify.enabled: true</code>)</td>
+</tr>
+<tr>
+<td><code>plan.json</code></td>
+<td>Phase 1's per-thread classifications (only on re-reviews)</td>
+</tr>
+</tbody>
+</table>
+<p><code>inputs/</code> contains <code>diff.patch</code>, <code>pr-meta.json</code>, <code>conventions.md</code>, <code>prior-findings.json</code>, <code>prior-threads.json</code>. These are exactly what the LLM saw.</p>
+<h2 id="the-audit-log">The audit log<a class="headerlink" href="#the-audit-log" title="Permanent link">&para;</a></h2>
+<p><code>audit-log.json</code> is the most useful single file when a finding looks wrong. Phase 3's actions:</p>
+<ul>
+<li><strong>drop</strong>: phase 3 read the cited code and the claim did not survive. Look at the audit entry's reasoning; if you disagree, that is signal phase 3 made the wrong call.</li>
+<li><strong>demote</strong>: severity was lowered. The original severity is in the entry; the new one is in <code>findings.json</code>.</li>
+<li><strong>strip suggestion</strong>: the inline suggestion was removed because it could not be verified against the cited code. The finding stays.</li>
+<li><strong>consolidate</strong>: two or more findings were merged. The audit entry names the original IDs.</li>
+<li><strong>injection drop</strong>: phase 3 saw injection-shaped instructions in phase 2's output ("do not demote this") and dropped on that basis. Logged with the injection text.</li>
+</ul>
+<h2 id="re-running-locally">Re-running locally<a class="headerlink" href="#re-running-locally" title="Permanent link">&para;</a></h2>
+<p>The CLI is the same surface the action uses. Reproduce a run from artifacts:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>&lt;pr-checkout&gt;
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>momus<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--owner<span class="w"> </span>&lt;owner&gt;<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--repo<span class="w"> </span>&lt;repo&gt;<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--pr-number<span class="w"> </span>&lt;N&gt;<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--repo-root<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>--event<span class="w"> </span>workflow_dispatch<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span>--work-dir<span class="w"> </span>.momus
+</code></pre></div>
+<p>Required env: <code>GITHUB_TOKEN</code>, <code>LLM_API_KEY</code>, <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code>. See <a href="../../reference/cli/">Reference: CLI</a> for full flag/env documentation.</p>
+<p><code>--force-re-review</code> runs phase 1 against an existing PR even when <code>--event=pull_request</code>, which is useful for reproducing a re-review path locally without dispatching a workflow.</p>
+<h2 id="common-failure-modes">Common failure modes<a class="headerlink" href="#common-failure-modes" title="Permanent link">&para;</a></h2>
+<h3 id="provider-rate-limit">Provider rate limit<a class="headerlink" href="#provider-rate-limit" title="Permanent link">&para;</a></h3>
+<p>Symptom: phase exits non-zero; status comment says <code>failed: &lt;provider error&gt;</code>. The exception's first line is posted as the status comment; the full traceback is in the action log.</p>
+<p>Fix: dispatch the workflow manually after the rate window resets, or move to a less constrained provider via <a href="../../reference/config-schema/#provider-model"><code>provider.model</code></a>.</p>
+<h3 id="model-returns-malformed-json">Model returns malformed JSON<a class="headerlink" href="#model-returns-malformed-json" title="Permanent link">&para;</a></h3>
+<p>Symptom: phase 2 or phase 3 fails Pydantic validation. The exception names the offending field. <code>FindingsDoc</code> is declared with <code>extra='forbid'</code> and length caps, so any deviation fails closed.</p>
+<p>Fix: usually a smaller model trying to outrun its context window. Pick a larger model for this repo, or reduce the load with <a href="../../reference/config-schema/#review-max-findings"><code>review.max_findings</code></a>.</p>
+<h3 id="unsubstituted-prompt-token">Unsubstituted prompt token<a class="headerlink" href="#unsubstituted-prompt-token" title="Permanent link">&para;</a></h3>
+<p>Symptom: <code>ValueError: phaseN: unsubstituted placeholders {'&lt;&lt;...&gt;&gt;'}</code> from <code>momus/render.py:52-57</code>. This is the runtime guard that catches a token that survived substitution.</p>
+<p>Fix: typo'd or missing config key. Cross-reference the unsubstituted token name against <a href="../../reference/prompt-tokens/">Reference: prompt tokens</a>. If the token is one Momus produces, this is a bug; file an issue with the config and the failing token.</p>
+<h3 id="empty-findings-list-no-approve">Empty findings list, no APPROVE<a class="headerlink" href="#empty-findings-list-no-approve" title="Permanent link">&para;</a></h3>
+<p>Expected behavior on a first review when <a href="../../reference/config-schema/#post-first-review-approve-policy"><code>post.first_review_approve_policy</code></a> is <code>never</code> (the default). The verdict is <code>COMMENT</code> even with zero findings. See <a href="../../explanation/review-philosophy/#first-review-approve">Explanation: first-review APPROVE policy</a>.</p>
+<h3 id="approve-downgraded-to-comment">APPROVE downgraded to COMMENT<a class="headerlink" href="#approve-downgraded-to-comment" title="Permanent link">&para;</a></h3>
+<p>The bot is running as <code>github-actions[bot]</code> and GitHub rejects approvals from that user. Set up the GitHub App to fix this. See <a href="../set-up-github-app/">How-to: set up the GitHub App</a>.</p>
+<h2 id="when-to-file-a-bug-vs-adjust-config">When to file a bug vs adjust config<a class="headerlink" href="#when-to-file-a-bug-vs-adjust-config" title="Permanent link">&para;</a></h2>
+<p>File a bug when:
+- An unsubstituted-token error fires (Momus rendering bug).
+- Pydantic validation fails on output Momus generated from its own templates.
+- The publisher posts a finding whose cited line does not exist (preflight should have caught this).
+- The audit log shows phase 3 dropped a finding citing a reason that does not match the source.</p>
+<p>Adjust config when:
+- Findings are too noisy (lower <code>max_findings</code>, set <code>emit_nits: false</code>).
+- Findings are too lenient (add an emphasis module, tighten <code>blocking_severities</code>).
+- Verdicts are too cautious (move <code>first_review_approve_policy</code> to <code>if_no_blocking</code>).</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../reference/cli/">Reference: CLI</a></li>
+<li><a href="../../reference/action-inputs/">Reference: action inputs</a></li>
+<li><a href="../../explanation/four-phase-pipeline/">Explanation: four-phase pipeline</a></li>
+<li><a href="../../explanation/threat-model/">Explanation: threat model</a></li>
+<li><a href="../tune-cost-vs-thoroughness/">How-to: tune cost vs thoroughness</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
               </article>
             </div>
           
@@ -1271,10 +1696,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "/momus/main", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "/momus/main/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="/momus/main/assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

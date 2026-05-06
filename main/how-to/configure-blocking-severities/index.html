@@ -10,25 +10,31 @@
       
       
       
+        <link rel="canonical" href="https://axiomantic.github.io/momus/main/how-to/configure-blocking-severities/">
       
+      
+        <link rel="prev" href="../../tutorial/first-review/">
+      
+      
+        <link rel="next" href="../add-convention-files/">
       
       
         
       
       
-      <link rel="icon" href="/momus/main/assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Momus</title>
+        <title>Configure blocking severities - Momus</title>
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="/momus/main/assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -47,9 +53,9 @@
       
     
     
-      <link rel="stylesheet" href="/momus/main/assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-    <script>__md_scope=new URL("/momus/main",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -73,6 +79,11 @@
     <label class="md-overlay" for="__drawer"></label>
     <div data-md-component="skip">
       
+        
+        <a href="#configure-which-severities-block-prs" class="md-skip">
+          Skip to content
+        </a>
+      
     </div>
     <div data-md-component="announce">
       
@@ -89,7 +100,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="/momus/main/." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -109,7 +120,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              
+              Configure blocking severities
             
           </span>
         </div>
@@ -227,7 +238,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="/momus/main/." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
+    <a href="../.." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -257,7 +268,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -338,7 +349,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/tutorial/first-review/" class="md-nav__link">
+      <a href="../../tutorial/first-review/" class="md-nav__link">
         
   
   
@@ -370,8 +381,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -382,13 +395,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -409,7 +420,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -424,10 +435,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-blocking-severities/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure blocking severities
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -443,6 +481,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#block-only-critical-and-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Block only critical and high
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#block-everything-except-nits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Block everything except nits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advisory-mode-block-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advisory mode (block nothing)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-with-the-first-review-approve-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair with the first-review APPROVE policy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -455,7 +579,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/add-convention-files/" class="md-nav__link">
+      <a href="../add-convention-files/" class="md-nav__link">
         
   
   
@@ -483,7 +607,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/configure-emphasis/" class="md-nav__link">
+      <a href="../configure-emphasis/" class="md-nav__link">
         
   
   
@@ -511,7 +635,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/set-up-github-app/" class="md-nav__link">
+      <a href="../set-up-github-app/" class="md-nav__link">
         
   
   
@@ -539,7 +663,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/use-different-llm-provider/" class="md-nav__link">
+      <a href="../use-different-llm-provider/" class="md-nav__link">
         
   
   
@@ -567,7 +691,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/tune-cost-vs-thoroughness/" class="md-nav__link">
+      <a href="../tune-cost-vs-thoroughness/" class="md-nav__link">
         
   
   
@@ -595,7 +719,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/debug-a-review/" class="md-nav__link">
+      <a href="../debug-a-review/" class="md-nav__link">
         
   
   
@@ -623,7 +747,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/how-to/extend-env-passthrough/" class="md-nav__link">
+      <a href="../extend-env-passthrough/" class="md-nav__link">
         
   
   
@@ -712,7 +836,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/action-inputs/" class="md-nav__link">
+      <a href="../../reference/action-inputs/" class="md-nav__link">
         
   
   
@@ -740,7 +864,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/config-schema/" class="md-nav__link">
+      <a href="../../reference/config-schema/" class="md-nav__link">
         
   
   
@@ -768,7 +892,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/prompt-tokens/" class="md-nav__link">
+      <a href="../../reference/prompt-tokens/" class="md-nav__link">
         
   
   
@@ -796,7 +920,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/emphasis-modules/" class="md-nav__link">
+      <a href="../../reference/emphasis-modules/" class="md-nav__link">
         
   
   
@@ -824,7 +948,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/reference/cli/" class="md-nav__link">
+      <a href="../../reference/cli/" class="md-nav__link">
         
   
   
@@ -913,7 +1037,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/four-phase-pipeline/" class="md-nav__link">
+      <a href="../../explanation/four-phase-pipeline/" class="md-nav__link">
         
   
   
@@ -941,7 +1065,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/review-philosophy/" class="md-nav__link">
+      <a href="../../explanation/review-philosophy/" class="md-nav__link">
         
   
   
@@ -969,7 +1093,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/threat-model/" class="md-nav__link">
+      <a href="../../explanation/threat-model/" class="md-nav__link">
         
   
   
@@ -997,7 +1121,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/explanation/adversarial-corpus/" class="md-nav__link">
+      <a href="../../explanation/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1086,7 +1210,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/dev-loop/" class="md-nav__link">
+      <a href="../../contributing/dev-loop/" class="md-nav__link">
         
   
   
@@ -1114,7 +1238,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/adversarial-corpus/" class="md-nav__link">
+      <a href="../../contributing/adversarial-corpus/" class="md-nav__link">
         
   
   
@@ -1142,7 +1266,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/modifying-prompts/" class="md-nav__link">
+      <a href="../../contributing/modifying-prompts/" class="md-nav__link">
         
   
   
@@ -1170,7 +1294,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/momus/main/contributing/release-process/" class="md-nav__link">
+      <a href="../../contributing/release-process/" class="md-nav__link">
         
   
   
@@ -1215,6 +1339,82 @@
   
   
   
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Default
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#block-only-critical-and-high" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Block only critical and high
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#block-everything-except-nits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Block everything except nits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advisory-mode-block-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advisory mode (block nothing)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pair-with-the-first-review-approve-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pair with the first-review APPROVE policy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
   
 </nav>
                   </div>
@@ -1227,8 +1427,58 @@
               
               <article class="md-content__inner md-typeset">
                 
-  <h1>404 - Not found</h1>
+                  
 
+
+  
+  
+
+
+<h1 id="configure-which-severities-block-prs">Configure which severities block PRs<a class="headerlink" href="#configure-which-severities-block-prs" title="Permanent link">&para;</a></h1>
+<p>You want to control when Momus posts <code>REQUEST_CHANGES</code> versus an advisory <code>COMMENT</code>. The lever is <a href="../../reference/config-schema/#review-blocking-severities"><code>review.blocking_severities</code></a> in <code>.momus.yaml</code>.</p>
+<p>The severity scale is fixed: <code>critical</code>, <code>high</code>, <code>medium</code>, <code>low</code>, <code>nit</code>. What you configure is the subset that blocks merge. Anything not on the list still posts as a finding; it just does not flip the verdict.</p>
+<h2 id="default">Default<a class="headerlink" href="#default" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">blocking_severities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">critical</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">high</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">medium</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p><code>low</code> and <code>nit</code> are advisory. This is the styleseat default and a reasonable starting point for most repos.</p>
+<h2 id="block-only-critical-and-high">Block only critical and high<a class="headerlink" href="#block-only-critical-and-high" title="Permanent link">&para;</a></h2>
+<p>For a repo with strong CI, where mediums tend to be caught by tests anyway:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">blocking_severities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">critical</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">high</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<p>Mediums still post and are still visible. They just do not block.</p>
+<h2 id="block-everything-except-nits">Block everything except nits<a class="headerlink" href="#block-everything-except-nits" title="Permanent link">&para;</a></h2>
+<p>For a strict repo where any non-nit finding is reason enough to hold a PR:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">blocking_severities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">critical</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">high</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">medium</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">low</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<h2 id="advisory-mode-block-nothing">Advisory mode (block nothing)<a class="headerlink" href="#advisory-mode-block-nothing" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">review</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">blocking_severities</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span>
+</code></pre></div>
+<p>Every finding posts as a <code>COMMENT</code>. The bot becomes a second-opinion reviewer rather than a gate. Useful when introducing Momus to a team that has not yet decided how much weight to give it.</p>
+<h2 id="pair-with-the-first-review-approve-policy">Pair with the first-review APPROVE policy<a class="headerlink" href="#pair-with-the-first-review-approve-policy" title="Permanent link">&para;</a></h2>
+<p><a href="../../reference/config-schema/#post-first-review-approve-policy"><code>post.first_review_approve_policy</code></a> decides whether an empty findings list becomes <code>APPROVE</code> on a brand-new PR. The two settings interact: a tight blocking list with <code>first_review_approve_policy: never</code> means the bot will mostly post <code>COMMENT</code>; a loose list with <code>if_no_blocking</code> means it will frequently <code>APPROVE</code>.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../reference/config-schema/#review-blocking-severities">Reference: <code>review.blocking_severities</code></a></li>
+<li><a href="../../explanation/review-philosophy/#severity-and-blocking">Explanation: severity and blocking</a></li>
+<li><a href="../tune-cost-vs-thoroughness/">How-to: tune cost vs thoroughness</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
               </article>
             </div>
           
@@ -1271,10 +1521,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "/momus/main", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "/momus/main/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="/momus/main/assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
