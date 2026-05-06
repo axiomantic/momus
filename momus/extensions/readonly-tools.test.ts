@@ -876,6 +876,52 @@ describe("rejectAbsoluteArgv", () => {
     const r = rejectAbsoluteArgv(["ls", "subdir"]);
     expect(r.ok).toBe(true);
   });
+
+  test("bash_ro_rejects_dotdot_traversal_argv_token", () => {
+    // BOT-A2: `cat ../../etc/passwd` — `..` traversal must be rejected.
+    // Absolute paths (`/etc/passwd`) and `~/` already covered, but a leading
+    // `..` segment can still escape the cwd. The model should not be allowed
+    // to walk out of the contained region via relative traversal.
+    const r = rejectAbsoluteArgv(["cat", "../../etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("../../etc/passwd");
+    }
+  });
+
+  test("bash_ro_rejects_bare_dotdot_argv_token", () => {
+    const r = rejectAbsoluteArgv(["ls", ".."]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("..");
+    }
+  });
+
+  test("bash_ro_rejects_embedded_dotdot_segment", () => {
+    // `cat foo/../../etc/passwd` — `..` segment in middle still escapes.
+    const r = rejectAbsoluteArgv(["cat", "foo/../../etc/passwd"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe("DotDotPathArg");
+      expect(r.offending).toBe("foo/../../etc/passwd");
+    }
+  });
+
+  test("bash_ro_allows_token_containing_dotdot_substring_but_not_segment", () => {
+    // `..` as a substring of a filename component is fine (e.g. `a..b`),
+    // only path-segment `..` should be rejected. Legitimate filenames may
+    // include consecutive dots.
+    const r = rejectAbsoluteArgv(["cat", "a..b.txt"]);
+    expect(r.ok).toBe(true);
+  });
+
+  test("bash_ro_allows_legitimate_relative_filename_after_dotdot_fix", () => {
+    // Sanity: the canonical example from the finding still works.
+    const r = rejectAbsoluteArgv(["cat", "README.md"]);
+    expect(r.ok).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

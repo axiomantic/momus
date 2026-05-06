@@ -719,10 +719,14 @@ function checkRefColonPathArgv(
 // W4-BashArgvWalk: absolute/tilde argv rejection for non-git binaries
 // ---------------------------------------------------------------------------
 
-export type ArgvRejectReason = "AbsolutePathArg" | "HomePathArg";
+export type ArgvRejectReason =
+  | "AbsolutePathArg"
+  | "HomePathArg"
+  | "DotDotPathArg";
 
 /**
- * Reject argv tokens that begin with `/` (absolute) or `~`/`~/` (home).
+ * Reject argv tokens that begin with `/` (absolute), `~`/`~/` (home), or
+ * contain a `..` path segment (parent traversal).
  *
  * Skips `argv[0]` (the binary name; ALLOWED_BINS already constrains it).
  * Walked AFTER tokenize() + ALLOWED_BINS check; runs INSTEAD of
@@ -731,10 +735,16 @@ export type ArgvRejectReason = "AbsolutePathArg" | "HomePathArg";
  * containing `/` such as `origin/main`).
  *
  * Rationale: tools like `cat`, `head`, `tail`, `wc`, `find`, `grep`, `rg`,
- * `ls` all accept positional path arguments. An absolute path here means
- * the LLM is reaching outside the repo; a `~/`-prefixed path means the
- * LLM is reaching into the runner's home directory. Both are out of
- * scope for a read-only review tool and are rejected without spawning.
+ * `ls` all accept positional path arguments. Three escape vectors are out
+ * of scope for a read-only review tool:
+ *   - Absolute path (`/etc/passwd`): reaching outside the repo.
+ *   - `~/`-prefix (`~/.aws/credentials`): reaching into the runner's home.
+ *   - `..` segment (`../../etc/passwd`): walking up out of the cwd via
+ *     relative traversal. This was BOT-A2: prior to this, the wrapper
+ *     blocked absolute and `~/` but let `..` slip through.
+ * `..` is matched as a path SEGMENT (between separators), so legitimate
+ * filenames like `a..b.txt` are still accepted. Both `/` and `\` are
+ * treated as separators to defend against Windows-style mixed paths.
  */
 export function rejectAbsoluteArgv(
   argv: string[],
@@ -748,6 +758,12 @@ export function rejectAbsoluteArgv(
     }
     if (tok === "~" || tok.startsWith("~/")) {
       return { ok: false, reason: "HomePathArg", offending: tok };
+    }
+    // Split on both `/` and `\` so a Windows-style path can't sneak `..`
+    // past us. `tok === ".."` and any embedded `..` segment both reject.
+    const segments = tok.split(/[/\\]/);
+    if (segments.includes("..")) {
+      return { ok: false, reason: "DotDotPathArg", offending: tok };
     }
   }
   return { ok: true };
