@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from typing import Any
 
 from .config import Config
@@ -389,8 +390,23 @@ def _submit_review(
         "event": event,
         "comments": inline_comments,
     }
+    # Observability: log the POST attempt so a missing-review postmortem
+    # can distinguish "publish never called" from "publish called but GH
+    # silently no-op'd". `_log` prints to stderr; sensitive tokens never
+    # appear in this line (only endpoint + event + comment count).
+    print(
+        f"momus: POST {endpoint} event={event} "
+        f"head_sha={head_sha[:7]} inline_comments={len(inline_comments)}",
+        file=sys.stderr,
+    )
     try:
-        _gh_api("POST", endpoint, payload)
+        resp = _gh_api("POST", endpoint, payload)
+        review_id = resp.get("id") if isinstance(resp, dict) else None
+        review_url = resp.get("html_url") if isinstance(resp, dict) else None
+        print(
+            f"momus: review submitted id={review_id} url={review_url}",
+            file=sys.stderr,
+        )
         return
     except _GhApiError as exc:
         if exc.status != 422:
