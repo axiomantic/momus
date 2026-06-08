@@ -701,6 +701,75 @@ def test_pi_env_does_not_mutate_os_environ(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Pi provider timeout: settings.json materialization + env wiring.
+#
+# Pi-coding-agent forwards settings.retry.provider.timeoutMs into its
+# OpenAI SDK per-request timeout. The SDK default of 600s is too short
+# for long deepseek phase2 reviews on multi-commit PRs; momus writes a
+# settings.json under PI_CODING_AGENT_DIR so the subprocess picks up
+# our override.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_sets_agent_dir_with_settings_file(monkeypatch, tmp_path):
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    agent_dir = Path(env["PI_CODING_AGENT_DIR"])
+    assert agent_dir == work_dir / ".pi-agent"
+    settings_path = agent_dir / "settings.json"
+    assert settings_path.is_file()
+    payload = json.loads(settings_path.read_text())
+    assert payload["retry"]["provider"]["timeoutMs"] == 1_800_000
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_respects_momus_pi_timeout_ms_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("MOMUS_PI_TIMEOUT_MS", "900000")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    payload = json.loads(Path(env["PI_CODING_AGENT_DIR"], "settings.json").read_text())
+    assert payload["retry"]["provider"]["timeoutMs"] == 900_000
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_falls_back_on_non_integer_timeout(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("MOMUS_PI_TIMEOUT_MS", "not-a-number")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    with caplog.at_level(logging.WARNING):
+        env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    payload = json.loads(Path(env["PI_CODING_AGENT_DIR"], "settings.json").read_text())
+    assert payload["retry"]["provider"]["timeoutMs"] == 1_800_000
+    assert any("MOMUS_PI_TIMEOUT_MS" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_falls_back_on_non_positive_timeout(monkeypatch, tmp_path, caplog):
+    monkeypatch.setenv("MOMUS_PI_TIMEOUT_MS", "0")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    with caplog.at_level(logging.WARNING):
+        env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    payload = json.loads(Path(env["PI_CODING_AGENT_DIR"], "settings.json").read_text())
+    assert payload["retry"]["provider"]["timeoutMs"] == 1_800_000
+    assert any("MOMUS_PI_TIMEOUT_MS" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_env_passthrough_cannot_clobber_pi_coding_agent_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "/should/not/win")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "PI_CODING_AGENT_DIR")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    # Orchestrator's value wins; passthrough listing is reserved-skipped.
+    assert env["PI_CODING_AGENT_DIR"] == str(work_dir / ".pi-agent")
+
+
+# ---------------------------------------------------------------------------
 # summarize_usage: cost + token totals from pi event stream
 # ---------------------------------------------------------------------------
 

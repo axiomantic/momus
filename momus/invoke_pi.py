@@ -79,6 +79,66 @@ def summarize_usage(events: Iterable[dict]) -> PhaseUsage:
 
 EXTENSION_PATH = Path(__file__).resolve().parent / "extensions" / "readonly-tools.ts"
 
+# Upstream provider timeout for the pi subprocess's HTTP client.
+#
+# Pi-coding-agent forwards `settings.retry.provider.timeoutMs` into the
+# OpenAI SDK's per-request timeout (see pi-coding-agent
+# core/sdk.js: streamFn -> streamSimple(..., {timeoutMs})). The OpenAI
+# SDK's default is 600_000ms (10 minutes); on long phase-2 reviews of
+# multi-commit PRs the streaming completion can outlast that, which
+# manifests on OpenRouter as "Upstream idle timeout exceeded" right as
+# the client-side budget elapses (~597s observed on a 5616-event run
+# against deepseek/deepseek-v4-pro).
+#
+# We bump the default to 30 minutes and let operators override per CI
+# run via MOMUS_PI_TIMEOUT_MS (positive integer, milliseconds). The
+# value is plumbed through a momus-owned project settings file written
+# under `work_dir/.pi-agent/settings.json`; pi reads it because we set
+# PI_CODING_AGENT_DIR to that directory in the subprocess env.
+_DEFAULT_PI_TIMEOUT_MS = 1_800_000  # 30 minutes
+_PI_AGENT_DIR_NAME = ".pi-agent"
+
+
+def _resolve_pi_timeout_ms() -> int:
+    raw = os.environ.get("MOMUS_PI_TIMEOUT_MS")
+    if not raw:
+        return _DEFAULT_PI_TIMEOUT_MS
+    try:
+        v = int(raw)
+    except ValueError:
+        log.warning(
+            "MOMUS_PI_TIMEOUT_MS=%r is not an integer; falling back to %dms",
+            raw,
+            _DEFAULT_PI_TIMEOUT_MS,
+        )
+        return _DEFAULT_PI_TIMEOUT_MS
+    if v <= 0:
+        log.warning(
+            "MOMUS_PI_TIMEOUT_MS=%d must be > 0; falling back to %dms",
+            v,
+            _DEFAULT_PI_TIMEOUT_MS,
+        )
+        return _DEFAULT_PI_TIMEOUT_MS
+    return v
+
+
+def _write_pi_settings(work_dir: Path) -> Path:
+    """Materialize a pi settings.json with our preferred provider timeout.
+
+    Returns the parent agent dir (the value PI_CODING_AGENT_DIR must
+    point at). The file is written every phase invocation — cheap, and
+    keeps the resolved timeout in sync if MOMUS_PI_TIMEOUT_MS changed
+    between phases.
+    """
+    agent_dir = work_dir / _PI_AGENT_DIR_NAME
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = agent_dir / "settings.json"
+    timeout_ms = _resolve_pi_timeout_ms()
+    payload = {"retry": {"provider": {"timeoutMs": timeout_ms}}}
+    settings_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return agent_dir
+
+
 # W3: Default-deny env allowlist for the pi subprocess.
 #
 # Per design §W3 (refresh 2026-05-05): replace the previous wholesale
@@ -123,7 +183,15 @@ _PASSTHROUGH_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 # MOMUS_PI_ENV_PASSTHROUGH they are NOT forwarded (would otherwise let a
 # malicious caller clobber MOMUS_WORK_DIR or redirect the toolcall log).
 _RESERVED_PASSTHROUGH: frozenset[str] = frozenset(
-    {"MOMUS_WORK_DIR", "MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_TOOLCALL_LOG"}
+    {
+        "MOMUS_WORK_DIR",
+        "MOMUS_PI_ENV_PASSTHROUGH",
+        "MOMUS_TOOLCALL_LOG",
+        # Owned by momus: points at the settings.json that carries our
+        # retry.provider.timeoutMs override. A caller-supplied value would
+        # silently disable the upstream-timeout fix.
+        "PI_CODING_AGENT_DIR",
+    }
 )
 
 PHASE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
@@ -571,4 +639,9 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
             out[token] = v
 
     out["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
+    # Point pi-coding-agent at a momus-owned config dir so it picks up
+    # our retry.provider.timeoutMs override (see _write_pi_settings).
+    # Written LAST so a passthrough listing PI_CODING_AGENT_DIR cannot
+    # clobber the orchestrator's value.
+    out["PI_CODING_AGENT_DIR"] = str(_write_pi_settings(work_dir))
     return out
