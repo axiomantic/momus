@@ -94,9 +94,19 @@ const OUTPUTS_DIR = process.env.MOMUS_WORK_DIR
   ? `${process.env.MOMUS_WORK_DIR}/outputs`
   : "outputs";
 
-const MAX_OUTPUT_BYTES = 256 * 1024;
-const COMMAND_TIMEOUT_MS = 30_000;
-const MAX_READ_BYTES = 4 * 1024 * 1024; // 4 MiB cap per read_repo call
+// Env-overridable so the orchestrator can raise per-phase limits for
+// very large PRs without rebuilding the extension. Bad/negative values
+// silently fall back to the defaults (no fail-open on misconfig).
+function _envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const MAX_OUTPUT_BYTES = _envPositiveInt("MOMUS_BASH_RO_MAX_OUTPUT_BYTES", 256 * 1024);
+const COMMAND_TIMEOUT_MS = _envPositiveInt("MOMUS_BASH_RO_TIMEOUT_MS", 30_000);
+const MAX_READ_BYTES = _envPositiveInt("MOMUS_READ_REPO_MAX_BYTES", 4 * 1024 * 1024);
 
 // Cwd-containment taxonomy (W2). Shared across read_repo, grep_repo,
 // find_repo, ls_repo and the bash_ro git wrapper.
@@ -314,8 +324,8 @@ export async function executeReadRepo(
 // W2-Tools-Grep / Find / Ls
 // ---------------------------------------------------------------------------
 
-const MAX_GREP_MATCHES = 1000;
-const MAX_FIND_RESULTS = 5000;
+const MAX_GREP_MATCHES = _envPositiveInt("MOMUS_GREP_REPO_MAX_MATCHES", 1000);
+const MAX_FIND_RESULTS = _envPositiveInt("MOMUS_FIND_REPO_MAX_RESULTS", 5000);
 
 export interface GrepRepoParams {
   pattern: string;

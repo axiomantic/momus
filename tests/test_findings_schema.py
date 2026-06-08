@@ -213,3 +213,51 @@ def test_finding_alone_validates():
     """The Finding model is exported and validates standalone."""
     f = Finding.model_validate(_minimal_finding())
     assert f.id == "BOT-A1"
+
+
+def test_schema_autofills_missing_summary_on_approve_with_empty_findings():
+    """gpt-4o regression: APPROVE with empty findings and no summary key.
+
+    Observed in production against axiomantic/lockfree-temp#1. Pre-fix this
+    raised FindingsValidationError, blocking publish entirely. Post-fix the
+    summary is auto-derived from verdict + finding count so the publisher
+    still has signal to render.
+    """
+    raw = {"verdict": "APPROVE", "tally": {}, "findings": []}
+    doc = FindingsDoc.model_validate(raw)
+    assert doc.verdict == "APPROVE"
+    assert "APPROVE" in doc.summary
+    assert "no findings" in doc.summary.lower()
+    assert "auto-filled" in doc.summary.lower()
+
+
+def test_schema_autofills_summary_when_present_but_empty_string():
+    """`summary: ""` is treated as omission and replaced with the auto-fill."""
+    raw = {"summary": "   ", "verdict": "APPROVE", "tally": {}, "findings": []}
+    doc = FindingsDoc.model_validate(raw)
+    assert doc.summary.strip() != ""
+    assert "auto-filled" in doc.summary.lower()
+
+
+def test_schema_preserves_explicit_summary():
+    """When the model DOES emit summary, the auto-fill MUST NOT clobber it."""
+    raw = {
+        "summary": "Reviewed three commits; one nit on naming.",
+        "verdict": "COMMENT",
+        "tally": {"nit": 1},
+        "findings": [],
+    }
+    doc = FindingsDoc.model_validate(raw)
+    assert doc.summary == "Reviewed three commits; one nit on naming."
+
+
+def test_schema_autofills_summary_with_finding_count_when_findings_present():
+    """If findings are present but summary is omitted, mention the count."""
+    raw = {
+        "verdict": "REQUEST_CHANGES",
+        "tally": {"high": 2},
+        "findings": [_minimal_finding(), {**_minimal_finding(), "id": "BOT-A2"}],
+    }
+    doc = FindingsDoc.model_validate(raw)
+    assert "2 findings" in doc.summary
+    assert "REQUEST_CHANGES" in doc.summary

@@ -99,6 +99,15 @@ PI_ENV_ALWAYS_ALLOW: frozenset[str] = frozenset(
         "LLM_BASE_URL",
         "LLM_MODEL",
         "LLM_API_KEY",
+        # readonly-tools.ts tunables (see momus/extensions/readonly-tools.ts).
+        # Momus-owned, safe to forward unconditionally; let callers raise
+        # phase-2 ceilings for large PRs without touching the extension code.
+        # Unset values fall back to the extension's hard-coded defaults.
+        "MOMUS_BASH_RO_MAX_OUTPUT_BYTES",
+        "MOMUS_BASH_RO_TIMEOUT_MS",
+        "MOMUS_READ_REPO_MAX_BYTES",
+        "MOMUS_GREP_REPO_MAX_MATCHES",
+        "MOMUS_FIND_REPO_MAX_RESULTS",
     }
 )
 

@@ -82,9 +82,17 @@ class PriorStatusEntry(BaseModel):
 
 
 class FindingsDoc(BaseModel):
-    """Top-level findings.json shape produced by phase 2."""
+    """Top-level findings.json shape produced by phase 2.
 
-    summary: str = Field(min_length=1, max_length=2000)
+    `summary` is required in the wire contract but auto-filled when the
+    model omits it (observed with `openai/gpt-4o`, which sometimes emits
+    `{"verdict": ..., "tally": ..., "findings": []}` and nothing else).
+    The auto-fill is derived from `verdict` + finding counts so the
+    publish-bound text is still meaningful; this is a fallback, not a
+    license to drop the field. See `_autofill_summary` below.
+    """
+
+    summary: str = Field(default="", max_length=2000)
     verdict: Verdict
     tally: dict[str, int] = Field(default_factory=dict)
     findings: list[Finding] = Field(default_factory=list, max_length=200)
@@ -93,3 +101,37 @@ class FindingsDoc(BaseModel):
     noteworthy: list[str] | None = None
 
     model_config = {"extra": "forbid"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _autofill_summary(cls, data):  # type: ignore[no-untyped-def]
+        """Derive `summary` from verdict+findings when the model omits it.
+
+        Some providers (notably `openai/gpt-4o`) reliably drop `summary`
+        when the verdict is APPROVE with an empty findings list. Rather
+        than fail-close the entire run (publish skipped, PR has no
+        signal at all), synthesize a short factual summary so the
+        downstream publisher still has something to render. The
+        synthesis is deterministic and reads as a fallback, not as
+        model-authored prose.
+        """
+        if not isinstance(data, dict):
+            return data
+        existing = data.get("summary")
+        if isinstance(existing, str) and existing.strip():
+            return data
+        verdict = data.get("verdict", "COMMENT")
+        findings = data.get("findings") or []
+        n = len(findings) if isinstance(findings, list) else 0
+        if n == 0:
+            text = (
+                f"{verdict}: no findings surfaced "
+                "(summary auto-filled; model omitted the `summary` field)."
+            )
+        else:
+            text = (
+                f"{verdict}: {n} finding{'s' if n != 1 else ''} reported "
+                f"(summary auto-filled; model omitted the `summary` field)."
+            )
+        data["summary"] = text
+        return data

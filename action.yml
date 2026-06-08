@@ -57,6 +57,16 @@ runs:
         # LLM_API_KEY / LLM_BASE_URL / LLM_MODEL are also expected to be set as
         # env on the calling `uses:` step. We never echo these.
         GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        # readonly-tools ceilings (see momus/extensions/readonly-tools.ts).
+        # Defaults baked into the extension are conservative; large multi-
+        # commit PRs (~13+ commits) routinely truncate phase-2 grep output
+        # and force the model to short-circuit. Bumping here gives every
+        # consumer headroom without each caller wiring it themselves. A
+        # caller can still override by setting the same key on its own
+        # `uses:` step env block (later wins).
+        MOMUS_GREP_REPO_MAX_MATCHES: ${{ env.MOMUS_GREP_REPO_MAX_MATCHES || '5000' }}
+        MOMUS_BASH_RO_MAX_OUTPUT_BYTES: ${{ env.MOMUS_BASH_RO_MAX_OUTPUT_BYTES || '1048576' }}
+        MOMUS_READ_REPO_MAX_BYTES: ${{ env.MOMUS_READ_REPO_MAX_BYTES || '8388608' }}
       run: |
         OWNER="${GITHUB_REPOSITORY%%/*}"
         REPO="${GITHUB_REPOSITORY#*/}"
