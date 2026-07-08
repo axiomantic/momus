@@ -12,10 +12,54 @@ inputs:
     description: "Working directory for inputs/, outputs/, prompts/"
     required: false
     default: ".momus"
+  app_id:
+    description: >-
+      GitHub App ID (e.g. secrets.MOMUS_APP_ID). Pass together with
+      private_key to make momus authenticate AS THE APP so APPROVE verdicts
+      post as real approvals. Omit to fall back to the caller's GITHUB_TOKEN
+      (APPROVE is then downgraded to COMMENT; see publish.py).
+    required: false
+    default: ""
+  private_key:
+    description: >-
+      GitHub App private key PEM (e.g. secrets.MOMUS_APP_PRIVATE_KEY). Pass
+      together with app_id. See app_id.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # Mint an App installation token when app_id + private_key are supplied.
+    # gh reads GH_TOKEN before GITHUB_TOKEN, so exporting the installation
+    # token below makes the review POST in publish.py authenticate AS THE
+    # APP -- letting APPROVE verdicts post as real approvals instead of the
+    # 422 -> COMMENT downgrade that the default Actions GITHUB_TOKEN (the
+    # github-actions[bot] identity) forces. When the inputs are absent both
+    # steps no-op and momus falls back to the caller's GITHUB_TOKEN.
+    - name: Generate App installation token
+      id: app-token
+      if: ${{ inputs.app_id != '' && inputs.private_key != '' }}
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.private_key }}
+
+    - name: Export App token as GH_TOKEN
+      if: ${{ steps.app-token.outputs.token != '' }}
+      shell: bash
+      env:
+        APP_TOKEN: ${{ steps.app-token.outputs.token }}
+      run: |
+        # $GITHUB_ENV makes GH_TOKEN visible to every later step in this
+        # composite action (the Run momus step's `gh` picks it up). The token
+        # is already registered as a masked secret by create-github-app-token;
+        # the explicit ::add-mask:: is belt-and-suspenders. Note: momus's pi
+        # subprocess env is default-deny (invoke_pi._build_pi_env) and GH_TOKEN
+        # is not on its allowlist, so the App token never reaches the LLM layer.
+        echo "::add-mask::$APP_TOKEN"
+        echo "GH_TOKEN=$APP_TOKEN" >> "$GITHUB_ENV"
+
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
