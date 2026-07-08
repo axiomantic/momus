@@ -1,0 +1,1794 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Thorough AI code review as a GitHub Action.">
+      
+      
+      
+        <link rel="canonical" href="https://axiomantic.github.io/momus/v1.2.2/reference/prompt-tokens/">
+      
+      
+        <link rel="prev" href="../config-schema/">
+      
+      
+        <link rel="next" href="../emphasis-modules/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Prompt tokens - Momus</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#prompt-tokens" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Momus" class="md-header__button md-logo" aria-label="Momus" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Momus
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Prompt tokens
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/axiomantic/momus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    axiomantic/momus
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Momus" class="md-nav__button md-logo" aria-label="Momus" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Momus
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/axiomantic/momus" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    axiomantic/momus
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorial
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorial
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorial/first-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure-blocking-severities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure blocking severities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-convention-files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add convention files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/configure-emphasis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configure emphasis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-up-github-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up the GitHub App
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/use-different-llm-provider/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use a different LLM provider
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/tune-cost-vs-thoroughness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tune cost vs thoroughness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/debug-a-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debug a review
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/extend-env-passthrough/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extend env passthrough
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../action-inputs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Action inputs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config-schema/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Config schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompt tokens
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompt tokens
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#token-work-dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;WORK_DIR&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-repo-emphasis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;REPO_EMPHASIS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-calibration-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;CALIBRATION_PROCEDURE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-blocking-severities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;BLOCKING_SEVERITIES&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-nit-scale-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;NIT_SCALE_LINE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-emit-nits-antipattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;EMIT_NITS_ANTIPATTERN&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-max-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;MAX_FINDINGS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-id-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;ID_EXAMPLE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-calibration-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;CALIBRATION_FIELD&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-noteworthy-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;NOTEWORTHY_FIELD&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-approve-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;APPROVE_RULE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-first-review-approve-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;FIRST_REVIEW_APPROVE_RULE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-id-scheme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;ID_SCHEME&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-untrusted-prior-threads-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;UNTRUSTED_PRIOR_THREADS_JSON&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../emphasis-modules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Emphasis modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/four-phase-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Four-phase pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/review-philosophy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Review philosophy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/threat-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threat model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/adversarial-corpus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adversarial corpus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Contributing
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/dev-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/adversarial-corpus/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adversarial corpus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/modifying-prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Modifying prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/release-process/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release process
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#token-work-dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;WORK_DIR&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-repo-emphasis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;REPO_EMPHASIS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-calibration-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;CALIBRATION_PROCEDURE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-blocking-severities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;BLOCKING_SEVERITIES&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-nit-scale-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;NIT_SCALE_LINE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-emit-nits-antipattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;EMIT_NITS_ANTIPATTERN&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-max-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;MAX_FINDINGS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-id-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;ID_EXAMPLE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-calibration-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;CALIBRATION_FIELD&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-noteworthy-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;NOTEWORTHY_FIELD&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-approve-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;APPROVE_RULE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-first-review-approve-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;FIRST_REVIEW_APPROVE_RULE&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-id-scheme" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;ID_SCHEME&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#token-untrusted-prior-threads-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;UNTRUSTED_PRIOR_THREADS_JSON&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="prompt-tokens">Prompt tokens<a class="headerlink" href="#prompt-tokens" title="Permanent link">&para;</a></h1>
+<p>Momus's phase 1 / 2 / 3 prompts are templated. Tokens of the form <code>&lt;&lt;TOKEN&gt;&gt;</code> are substituted at render time from config keys, env vars, or computed values, and the substituted prompt is what the LLM sees. Token detection regex: <code>r"&lt;&lt;([A-Z_][A-Z0-9_]*)&gt;&gt;"</code> (<code>momus/render.py</code> line 229).</p>
+<p>Failed substitution is a hard error. If any <code>&lt;&lt;TOKEN&gt;&gt;</code> survives substitution, <code>_find_unsubstituted</code> raises <code>ValueError(f"{phase}: unsubstituted placeholders {leftover}. ...")</code> (<code>momus/render.py</code> lines 52-57). Adding a new token requires wiring it in <code>_substitutions</code>; an orphan token in a prompt file aborts the run.</p>
+<p>Phase mapping: <code>phase1</code> → <code>prompts/phase1-plan.md</code>, <code>phase2</code> → <code>prompts/phase2-review.md</code>, <code>phase3</code> → <code>prompts/phase3-verify.md</code> (<code>momus/render.py</code> line 93).</p>
+<h2 id="token-work-dir"><code>&lt;&lt;WORK_DIR&gt;&gt;</code><a class="headerlink" href="#token-work-dir" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <code>work_dir_rel</code> arg (the <code>work_dir</code> path relative to the repo root).</li>
+<li>Used by: phase1, phase2, phase3.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Path prefix the model uses to reference <code>inputs/</code> and <code>outputs/</code> from inside the running pi cwd (which is the repo root).</p>
+<p>Example expansion when <code>work_dir: .momus</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Read &lt;&lt;WORK_DIR&gt;&gt;/inputs/diff.patch
+</code></pre></div>
+<p>becomes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Read .momus/inputs/diff.patch
+</code></pre></div>
+<h2 id="token-repo-emphasis"><code>&lt;&lt;REPO_EMPHASIS&gt;&gt;</code><a class="headerlink" href="#token-repo-emphasis" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-emphasis-modules"><code>review.emphasis_modules</code></a> + <a href="../config-schema/#review-repo-emphasis"><code>review.repo_emphasis</code></a>, composed by <code>_compose_repo_emphasis</code> (<code>momus/render.py</code> lines 204-223).</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0 (<code>repo_emphasis</code> only); modules added [next].</li>
+</ul>
+<p>Concatenated module bodies followed by the free-form <code>repo_emphasis</code> string, joined by blank lines. Falls back to <code>(none configured for this repo)</code> when both are empty. See <a href="../emphasis-modules/"><code>reference/emphasis-modules.md</code></a> for module bodies.</p>
+<h2 id="token-calibration-procedure"><code>&lt;&lt;CALIBRATION_PROCEDURE&gt;&gt;</code><a class="headerlink" href="#token-calibration-procedure" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-require-calibration"><code>review.require_calibration</code></a>. Boilerplate paragraph when <code>true</code>; empty string when <code>false</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>The calibration step the model must run before emitting any blocking finding ("would a human reviewer genuinely block this PR over this?").</p>
+<h2 id="token-blocking-severities"><code>&lt;&lt;BLOCKING_SEVERITIES&gt;&gt;</code><a class="headerlink" href="#token-blocking-severities" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-blocking-severities"><code>review.blocking_severities</code></a>, formatted as a backticked, comma-joined list.</li>
+<li>Used by: phase2, phase3.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Example expansion with the default <code>[critical, high, medium]</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>`critical`, `high`, `medium`
+</code></pre></div>
+<h2 id="token-nit-scale-line"><code>&lt;&lt;NIT_SCALE_LINE&gt;&gt;</code><a class="headerlink" href="#token-nit-scale-line" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-emit-nits"><code>review.emit_nits</code></a>. The literal severity-scale bullet for <code>nit</code> when <code>true</code>; empty string when <code>false</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>When <code>emit_nits=true</code> the line is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**nit**</span> (non-blocking): style, naming preference, minor readability.
+</code></pre></div>
+<h2 id="token-emit-nits-antipattern"><code>&lt;&lt;EMIT_NITS_ANTIPATTERN&gt;&gt;</code><a class="headerlink" href="#token-emit-nits-antipattern" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-emit-nits"><code>review.emit_nits</code></a>. Anti-pattern bullet when <code>false</code>; empty string when <code>true</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>When <code>emit_nits=false</code> the line is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Do not emit `nit`-severity findings; this repo has nits disabled.
+</code></pre></div>
+<h2 id="token-max-findings"><code>&lt;&lt;MAX_FINDINGS&gt;&gt;</code><a class="headerlink" href="#token-max-findings" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-max-findings"><code>review.max_findings</code></a> as a string.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Inserted into the Output section as the cap the model is told to consolidate under (e.g., <code>50</code>).</p>
+<h2 id="token-id-example"><code>&lt;&lt;ID_EXAMPLE&gt;&gt;</code><a class="headerlink" href="#token-id-example" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: computed from <a href="../config-schema/#review-run-id-scheme"><code>review.run_id_scheme</code></a> and the current run id (<code>momus/render.py</code> lines 145-157).</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Example finding ID inserted into the JSON template the model fills in. Shapes:</p>
+<ul>
+<li><code>alpha</code>: <code>BOT-A1</code></li>
+<li><code>numeric</code>: <code>BOT-1-1</code></li>
+<li><code>off</code>: <code>BOT-1</code></li>
+</ul>
+<h2 id="token-calibration-field"><code>&lt;&lt;CALIBRATION_FIELD&gt;&gt;</code><a class="headerlink" href="#token-calibration-field" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-require-calibration"><code>review.require_calibration</code></a>. JSON fragment for the <code>calibration</code> field when <code>true</code>; empty string when <code>false</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Optional <code>"calibration": {...}</code> field appended to the example finding in the schema description so the model emits it under the right key.</p>
+<h2 id="token-noteworthy-field"><code>&lt;&lt;NOTEWORTHY_FIELD&gt;&gt;</code><a class="headerlink" href="#token-noteworthy-field" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-noteworthy-max"><code>review.noteworthy_max</code></a>. JSON fragment when <code>&gt; 0</code>; empty string when <code>0</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Optional <code>"noteworthy": [...]</code> array appended to the schema example. Disabled when the cap is zero so the prompt does not solicit a section it would then drop.</p>
+<h2 id="token-approve-rule"><code>&lt;&lt;APPROVE_RULE&gt;&gt;</code><a class="headerlink" href="#token-approve-rule" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#post-first-review-approve-policy"><code>post.first_review_approve_policy</code></a>. Branches on <code>never</code> vs the two opt-in policies (<code>momus/render.py</code> lines 175-185).</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Inline conjunct of the <code>APPROVE</code> verdict rule the model applies when deciding the verdict.</p>
+<h2 id="token-first-review-approve-rule"><code>&lt;&lt;FIRST_REVIEW_APPROVE_RULE&gt;&gt;</code><a class="headerlink" href="#token-first-review-approve-rule" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#post-first-review-approve-policy"><code>post.first_review_approve_policy</code></a>. Branches on <code>never</code> / <code>if_no_findings</code> / <code>if_no_blocking</code>.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Sentence describing first-review APPROVE behavior. Visible to the model so it does not waste tokens deliberating about a verdict the publisher would override.</p>
+<h2 id="token-id-scheme"><code>&lt;&lt;ID_SCHEME&gt;&gt;</code><a class="headerlink" href="#token-id-scheme" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#review-run-id-scheme"><code>review.run_id_scheme</code></a>. Sentence built around the chosen scheme.</li>
+<li>Used by: phase2.</li>
+<li>Available since 1.0.</li>
+</ul>
+<p>Tells the model how to generate finding IDs (<code>BOT-A1</code>, <code>BOT-A2</code>, ... vs <code>BOT-1-1</code>, <code>BOT-1-2</code>, ... vs bare <code>BOT-1</code>).</p>
+<h2 id="token-untrusted-prior-threads-json"><code>&lt;&lt;UNTRUSTED_PRIOR_THREADS_JSON&gt;&gt;</code><a class="headerlink" href="#token-untrusted-prior-threads-json" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: contents of <code>&lt;&lt;WORK_DIR&gt;&gt;/inputs/prior-threads.json</code>, wrapped in <code>BEGIN_UNTRUSTED_PRIOR_THREADS_JSON</code> / <code>END_UNTRUSTED_PRIOR_THREADS_JSON</code> fences. Fence markers are UUID-suffixed if the body itself contains a fence (<code>momus/render.py</code> lines 17-19, 61-89).</li>
+<li>Used by: phase1.</li>
+<li>Available since 1.1.0.</li>
+</ul>
+<p>Phase-1-only fenced data block carrying prior-thread reply text. Documented to the LLM as DATA, not instructions; reply bodies are attacker-influenced and the fenced framing is what enforces that boundary. See <a href="../../explanation/threat-model/">Threat model</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "content.code.annotate", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
