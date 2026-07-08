@@ -650,3 +650,113 @@ def test_cost_footer_omits_model_when_blank():
         phase_usages=[("phase2", _usage(0.10, 1000, 200, model=""))],
     )
     assert "Cost: $0.10 - 1,000 in / 200 out tokens_" in body
+
+
+def test_422_rereview_approve_offhunk_body_only_downgrades_to_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-review regression (sonoscope PR #3, run 28904492555).
+
+    On a re-review whose verdict is APPROVE, the default GITHUB_TOKEN both
+    (a) cannot approve and (b) carries off-hunk inline comments. GitHub
+    surfaces the off-hunk error first, so the app-cannot-approve branch is
+    NOT taken. The body-only demote retry previously kept event=APPROVE and
+    hit a SECOND 422 that was unhandled -> the publisher crashed.
+
+    Expected now: attempt 1 (APPROVE+inline) 422s off-hunk, attempt 2
+    (APPROVE body-only) 422s again, attempt 3 downgrades to COMMENT
+    body-only and succeeds. Findings survive in the body; no crash.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(payload)
+        if len(calls) == 1:
+            # Off-hunk error reported first (not the approve rejection).
+            raise publish_mod._GhApiError(
+                422, "Pull request review thread line must be part of the diff"
+            )
+        if len(calls) == 2:
+            # Body-only APPROVE still rejected: token cannot approve.
+            raise publish_mod._GhApiError(
+                422,
+                "GitHub Apps must use one of the events `COMMENT` or `REQUEST_CHANGES`",
+            )
+        return {}
+
+    monkeypatch.setattr(publish_mod, "_gh_api", fake_gh)
+
+    inline = [{"path": "f.py", "line": 999, "side": "RIGHT", "body": "finding body"}]
+    publish_mod._submit_review(
+        owner="axiomantic",
+        repo="sonoscope",
+        pr_number=3,
+        head_sha="abc",
+        body="original body",
+        inline_comments=inline,
+        event="APPROVE",
+    )
+
+    assert len(calls) == 3
+    # Attempt 1: original APPROVE + inline comments.
+    assert calls[0]["event"] == "APPROVE"
+    assert calls[0]["comments"] == inline
+    # Attempt 2: body-only, still APPROVE (off-hunk demote path).
+    assert calls[1]["event"] == "APPROVE"
+    assert calls[1]["comments"] == []
+    assert "demoted to body" in calls[1]["body"]
+    # Attempt 3: downgraded to COMMENT, body-only, findings preserved.
+    assert calls[2]["event"] == "COMMENT"
+    assert calls[2]["comments"] == []
+    assert "original body" in calls[2]["body"]
+    assert "demoted to body" in calls[2]["body"]
+    assert publish_mod._APP_CANNOT_APPROVE_REASON in calls[2]["body"]
+
+
+def test_422_app_cannot_approve_and_offhunk_cooccur_demotes_body_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When GitHub reports the approve-rejection first AND the inline
+    comments are off-hunk, the COMMENT+inline retry 422s; the publisher
+    must then strip comments and post body-only as COMMENT rather than
+    crash.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def fake_gh(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(payload)
+        if len(calls) == 1:
+            raise publish_mod._GhApiError(
+                422,
+                "GitHub Apps must use one of the events `COMMENT` or `REQUEST_CHANGES`",
+            )
+        if len(calls) == 2:
+            raise publish_mod._GhApiError(
+                422, "Pull request review thread line must be part of the diff"
+            )
+        return {}
+
+    monkeypatch.setattr(publish_mod, "_gh_api", fake_gh)
+
+    inline = [{"path": "f.py", "line": 999, "side": "RIGHT", "body": "finding body"}]
+    publish_mod._submit_review(
+        owner="axiomantic",
+        repo="sonoscope",
+        pr_number=3,
+        head_sha="abc",
+        body="original body",
+        inline_comments=inline,
+        event="APPROVE",
+    )
+
+    assert len(calls) == 3
+    assert calls[0]["event"] == "APPROVE"
+    # Attempt 2: downgraded to COMMENT but still carrying inline comments.
+    assert calls[1]["event"] == "COMMENT"
+    assert calls[1]["comments"] == inline
+    # Attempt 3: comments stripped, body-only COMMENT, findings preserved.
+    assert calls[2]["event"] == "COMMENT"
+    assert calls[2]["comments"] == []
+    assert "original body" in calls[2]["body"]
+    assert "demoted to body" in calls[2]["body"]
+    assert publish_mod._APP_CANNOT_APPROVE_REASON in calls[2]["body"]

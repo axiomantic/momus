@@ -383,52 +383,100 @@ def _submit_review(
     event: str,
 ) -> None:
     endpoint = f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-    payload = {
-        "commit_id": head_sha,
-        "body": body,
-        "event": event,
-        "comments": inline_comments,
-    }
+
+    def _post(evt: str, comments: list[dict[str, Any]], review_body: str) -> None:
+        _gh_api(
+            "POST",
+            endpoint,
+            {
+                "commit_id": head_sha,
+                "body": review_body,
+                "event": evt,
+                "comments": comments,
+            },
+        )
+
+    # Attempt 1: submit exactly as intended.
     try:
-        _gh_api("POST", endpoint, payload)
+        _post(event, inline_comments, body)
         return
     except _GhApiError as exc:
         if exc.status != 422:
             raise
-        # 422 on event=APPROVE most commonly means the token is the default
-        # Actions ``GITHUB_TOKEN`` (an installation token with no approval
-        # rights). The pre-emptive check in publish() can't distinguish
-        # this from a real App token, so we fall back here: prepend the
-        # downgrade note and retry as COMMENT. Resubmits keep inline
-        # comments — they were valid; only the verdict was rejected.
-        if event == "APPROVE" and _is_app_cannot_approve_error(str(exc)):
-            downgrade_payload = {
-                "commit_id": head_sha,
-                "body": _prepend_downgrade_note(body, _APP_CANNOT_APPROVE_REASON),
-                "event": "COMMENT",
-                "comments": inline_comments,
-            }
-            _gh_api("POST", endpoint, downgrade_payload)
-            return
-        # Self-approval 422 must NOT be retried — the retry would carry
-        # the same event and hit the same 422.
-        if _is_self_approval_error(str(exc)):
-            raise
+        msg = str(exc)
+
+    # A reviews POST can 422 for two independent — and possibly
+    # co-occurring — reasons:
+    #   (1) the review *event* is rejected: APPROVE from the default
+    #       Actions ``GITHUB_TOKEN`` / any App installation token, or
+    #       a self-approval; and/or
+    #   (2) an inline comment cites a line that is not on a diff hunk.
+    # We degrade along BOTH axes until the review posts, and ALWAYS keep
+    # the review body so findings are never dropped. GitHub reports only
+    # one of the two causes per response and the ordering is not
+    # guaranteed, so every branch below has a body-only last resort.
+
+    # (1) APPROVE rejected because the token cannot approve. Checked
+    # BEFORE self-approval on purpose: GitHub's App wording ("GitHub Apps
+    # cannot approve their own pull request") also trips the liberal
+    # self-approval matcher, and the correct handling for an App token is
+    # to downgrade to COMMENT, not to give up.
+    if event == "APPROVE" and _is_app_cannot_approve_error(msg):
+        downgraded_body = _prepend_downgrade_note(body, _APP_CANNOT_APPROVE_REASON)
         if not inline_comments:
+            _post("COMMENT", [], downgraded_body)
+            return
+        try:
+            # Keep inline comments — only the verdict was rejected.
+            _post("COMMENT", inline_comments, downgraded_body)
+            return
+        except _GhApiError as exc:
+            if exc.status != 422:
+                raise
+            # App-cannot-approve AND off-hunk comments co-occur: strip the
+            # comments and post body-only as COMMENT.
+            _post("COMMENT", [], _demote_note(downgraded_body))
+            return
+
+    # (2) Self-approval: the token owns the PR and cannot review it as any
+    # useful identity. Preserve the historical behavior of re-raising.
+    if _is_self_approval_error(msg):
+        raise _GhApiError(422, msg)
+
+    # (3) Otherwise the 422 is (most likely) an off-hunk inline comment.
+    # Strip inline comments and retry body-only.
+    if not inline_comments:
+        raise _GhApiError(422, msg)
+    try:
+        _post(event, [], _demote_note(body))
+        return
+    except _GhApiError as exc:
+        if exc.status != 422 or event != "APPROVE":
             raise
-        # Otherwise: 422 typically means at least one comment cited a line
-        # not on a diff hunk. Strip inline comments and retry body-only.
-        body_only = body + (
-            "\n\n_Note: inline comments were demoted to body because "
-            "some line citations were not on diff hunks._"
+        # The body-only retry STILL 422s with event=APPROVE. GitHub
+        # surfaced the off-hunk error on attempt 1 (so branch (1) never
+        # ran), but the token also cannot approve — the classic default
+        # GITHUB_TOKEN re-review case. Downgrade to COMMENT so the review
+        # still posts. Previously this second 422 was unhandled and
+        # crashed the publisher (the re-review regression this fixes).
+        _post(
+            "COMMENT",
+            [],
+            _demote_note(_prepend_downgrade_note(body, _APP_CANNOT_APPROVE_REASON)),
         )
-        retry_payload = {
-            "commit_id": head_sha,
-            "body": body_only,
-            "event": event,
-            "comments": [],
-        }
-        _gh_api("POST", endpoint, retry_payload)
+
+
+def _demote_note(body: str) -> str:
+    """Append the off-hunk demotion note to a review body.
+
+    Used whenever inline comments are stripped and their findings fall back
+    to the review body, so a human reading the review knows why the inline
+    anchors are missing.
+    """
+    return body + (
+        "\n\n_Note: inline comments were demoted to body because "
+        "some line citations were not on diff hunks._"
+    )
 
 
 def _post_thread_replies(
@@ -584,8 +632,17 @@ def _gh_api(method: str, endpoint: str, payload: dict[str, Any]) -> dict[str, An
         check=False,
     )
     if proc.returncode != 0:
-        status = _extract_status(proc.stderr)
-        raise _GhApiError(status, proc.stderr.strip() or proc.stdout.strip())
+        # gh writes a terse "gh: <reason> (HTTP <status>)" line to stderr
+        # and the full JSON error body — which names the actual failing
+        # field/reason (e.g. "must use one of the events `COMMENT`..." or
+        # "line must be part of the diff") — to stdout. Combine both so the
+        # _is_*_error discriminators in _submit_review can classify the
+        # 422; stderr alone ("gh: Unprocessable Entity (HTTP 422)") is too
+        # terse to tell an approve-rejection from an off-hunk comment, which
+        # is what let a re-review's APPROVE verdict crash the publisher.
+        status = _extract_status(proc.stderr) or _extract_status(proc.stdout)
+        detail = "\n".join(p for p in (proc.stderr.strip(), proc.stdout.strip()) if p)
+        raise _GhApiError(status, detail or f"gh api failed (HTTP {status})")
     if not proc.stdout.strip():
         return {}
     return json.loads(proc.stdout)
