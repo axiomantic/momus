@@ -24,6 +24,23 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `axiomantic/spellbook`. Both limits now come from the same registry
   lookup that already supplied pricing, so they track the model
   instead of drifting from it.
+- **Thinking mode is no longer left to the provider's default.** The
+  `byo` provider registration hand-set `reasoning: false` for whatever
+  model `LLM_MODEL` named. In pi-ai that field is a wire-level gate,
+  not a display hint: every thinking branch is guarded by it, so momus
+  sent no reasoning field at all and the endpoint's default decided how
+  much the review model thought. `reasoning` now comes from the same
+  registry lookup that already supplied pricing and limits, together
+  with the model's `thinkingLevelMap` and `compat`. All three are
+  needed: pi asks for its default thinking level, "medium", and the
+  registry records "medium" as unsupported for
+  `deepseek/deepseek-v4-pro`, so without the level map momus would send
+  the one effort value that model does not accept. With it the level
+  clamps to "high". The `compat` entry supplies
+  `requiresReasoningContentOnAssistantMessages`, which pi-ai cannot
+  auto-detect here because the provider is registered under the name
+  `byo` rather than `deepseek`, and without which DeepSeek rejects the
+  next turn with error 20015 once thinking is on.
 - **Pi no longer compacts against a window the model is nowhere
   near.** The same hard-coded `contextWindow: 128000` understated the
   production model's window by roughly 8x, which is why runs ended on

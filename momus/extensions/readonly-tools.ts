@@ -303,6 +303,115 @@ export function lookupModelLimits(modelId: string): {
   return { contextWindow: 128000, maxTokens: DEFAULT_MAX_TOKENS };
 }
 
+/**
+ * A floor under the compat pi-ai auto-detects for the "byo" registration,
+ * applied beneath the registry's own compat so a registry entry that states
+ * a value still wins.
+ *
+ * `supportsDeveloperRole` gates whether the system prompt is sent as
+ * `role: "developer"` instead of `role: "system"`, and pi-ai reads it only
+ * when `model.reasoning` is true. Detection cannot get this right for
+ * momus: the provider is registered under the name "byo", so pi-ai falls
+ * back to URL sniffing, and pinned pi-ai 0.72.1 computes
+ * `supportsDeveloperRole: !isNonStandard`, which is true for an OpenRouter
+ * URL. Upstream later corrected this in two places at once, neither of
+ * which is in the pinned version: 0.84.1's detection excludes OpenRouter
+ * unless the model id is an anthropic/ or openai/ one, and 0.84.1's
+ * registry entry for the production model states
+ * `supportsDeveloperRole: false` outright.
+ *
+ * The flag was unreachable while `reasoning` was hand-set to false, so
+ * enabling reasoning is what would expose it. DeepSeek accepts the system,
+ * user, assistant and tool roles; `developer` is an OpenAI-specific role
+ * and is not part of the change being made here, so the floor holds the
+ * system message at `role: "system"` and keeps the wire delta confined to
+ * the thinking-mode fields.
+ */
+const DEVELOPER_ROLE_FLOOR = { supportsDeveloperRole: false } as const;
+
+/**
+ * Look up the thinking-mode traits of a model in pi-ai's bundled registry:
+ * whether it reasons at all, which thinking levels it actually accepts, and
+ * the provider quirks that go with reasoning being on.
+ *
+ * The three travel together on purpose. `reasoning` is a wire-level gate,
+ * not a display hint: every thinking branch in pi-ai's `buildParams` is
+ * guarded by `&& model.reasoning`, so the registration's previous
+ * hand-written `reasoning: false` meant momus sent no reasoning field at all
+ * and whatever the provider defaults to decided how much the model thought.
+ * But `reasoning: true` on its own is also wrong. Pi asks for its default
+ * thinking level ("medium"; momus passes no --thinking flag) and
+ * `clampThinkingLevel` reads `thinkingLevelMap` to decide what the model can
+ * take. For deepseek/deepseek-v4-pro the registry maps "medium" to null, so
+ * with the map present the level clamps up to "high" and without it "medium"
+ * goes on the wire unchanged, which is the one value the registry says this
+ * model does not accept. `compat` completes the set: it carries
+ * `requiresReasoningContentOnAssistantMessages`, which pi-ai's detectCompat
+ * cannot infer here because momus registers the provider under the name
+ * "byo" against an OpenRouter base URL, so the DeepSeek probe misses.
+ *
+ * Matching is restricted to `openai-completions` entries. The same model id
+ * is registered under several providers and at least one of them uses the
+ * anthropic-messages API with a different compat contract; the byo provider
+ * registers `api: "openai-completions"`, so an entry for another API would
+ * describe a different wire format. This is stricter than `lookupModelCost`
+ * and `lookupModelLimits`, which take the first id match, because pricing
+ * and capacity are properties of the model while compat is a property of
+ * the model reached over a particular API.
+ *
+ * An unknown model falls back to the previous conservative behaviour: no
+ * reasoning and no thinking level map. It still gets the compat floor,
+ * which describes the registration rather than the model.
+ *
+ * Exported for tests.
+ */
+export function lookupModelReasoning(modelId: string): {
+  reasoning: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
+  compat: Record<string, unknown>;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id !== modelId || m.api !== "openai-completions") continue;
+      return {
+        reasoning: m.reasoning ?? false,
+        ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
+        compat: { ...DEVELOPER_ROLE_FLOOR, ...m.compat },
+      };
+    }
+  }
+  // The floor applies to an unknown model too. It is inert while reasoning
+  // is off, but a correctness floor that depends on a separate gate staying
+  // shut is not a floor.
+  return { reasoning: false, compat: { ...DEVELOPER_ROLE_FLOOR } };
+}
+
+/**
+ * Compose the single model entry the "byo" provider registers, sourcing
+ * every field pi-ai reads from pi-ai's own registry rather than from
+ * hand-written literals here.
+ *
+ * `maxTokensOverride` is the MOMUS_PI_MAX_TOKENS escape hatch: a workflow
+ * needs it when the endpoint's real ceiling is below the registry's, or to
+ * cap spend deliberately.
+ *
+ * Exported so tests assert the entry that is actually registered. A test
+ * against a hand-copied stand-in keeps passing after the registration
+ * drifts away from it.
+ */
+export function buildByoModelEntry(modelId: string, maxTokensOverride?: number) {
+  const limits = lookupModelLimits(modelId);
+  return {
+    id: modelId,
+    name: modelId,
+    input: ["text"],
+    cost: lookupModelCost(modelId),
+    contextWindow: limits.contextWindow,
+    maxTokens: maxTokensOverride ?? limits.maxTokens,
+    ...lookupModelReasoning(modelId),
+  };
+}
+
 function toolError(reason: ErrorReason, path: string) {
   return {
     content: [{ type: "text" as const, text: `error: ${reason}: ${path}` }],
@@ -1197,30 +1306,24 @@ export default function (pi: ExtensionAPI) {
   // "deepseek"). First match wins; in practice the pricing converges.
   // If no match, fall back to zeros and momus suppresses the cost line —
   // tokens still surface so a magnitude check is possible.
-  const cost = lookupModelCost(model);
-  // Capacity comes from the same registry as pricing. MOMUS_PI_MAX_TOKENS
-  // overrides the output cap when a workflow needs to hold it down (a
-  // provider whose real ceiling is lower than the registry's, or a
-  // deliberate spend limit).
-  const limits = lookupModelLimits(model);
-  const maxTokens = process.env.MOMUS_PI_MAX_TOKENS
-    ? resolveMaxTokens(process.env.MOMUS_PI_MAX_TOKENS)
-    : limits.maxTokens;
+  //
+  // Capacity, thinking-mode traits and provider quirks come from that same
+  // lookup, so every field pi-ai reads tracks the model together instead of
+  // one of them being hand-set and drifting. MOMUS_PI_MAX_TOKENS overrides
+  // the output cap when a workflow needs to hold it down (a provider whose
+  // real ceiling is lower than the registry's, or a deliberate spend limit).
   pi.registerProvider("byo", {
     name: "BYO (OpenAI-compatible)",
     baseUrl,
     apiKey: "LLM_API_KEY",
     api: "openai-completions",
     models: [
-      {
-        id: model,
-        name: model,
-        reasoning: false,
-        input: ["text"],
-        cost,
-        contextWindow: limits.contextWindow,
-        maxTokens,
-      },
+      buildByoModelEntry(
+        model,
+        process.env.MOMUS_PI_MAX_TOKENS
+          ? resolveMaxTokens(process.env.MOMUS_PI_MAX_TOKENS)
+          : undefined,
+      ),
     ],
   });
 
