@@ -84,6 +84,49 @@ export function validateMomusWorkDir(value: string | undefined): void {
 
 validateMomusWorkDir(process.env.MOMUS_WORK_DIR);
 
+/**
+ * Per-message output token cap for the "byo" provider.
+ *
+ * This budget covers reasoning tokens as well as visible output. Phase 2's
+ * job is to reason over a diff and then emit findings.json through
+ * write_output, so a cap sized for the answer alone starves the tool call:
+ * the message terminates with stopReason "length" mid-reasoning, pi's agent
+ * loop sees a message with no tool call and declares the agent finished,
+ * and pi exits 0 having written nothing. The orchestrator's retry then
+ * re-runs against the same cap and dies the same way.
+ *
+ * The previous value of 8192 did exactly that on three consecutive runs
+ * against axiomantic/spellbook. 32768 leaves room for a long analysis plus
+ * the findings document; override per workflow with MOMUS_PI_MAX_TOKENS.
+ */
+const DEFAULT_MAX_TOKENS = 32768;
+
+/**
+ * Parse MOMUS_PI_MAX_TOKENS. Throws on a value that is not a positive
+ * integer rather than falling back to the default: a typo that silently
+ * restores a starving cap reproduces the bug this setting exists to fix.
+ *
+ * Exported for tests.
+ */
+export function resolveMaxTokens(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_TOKENS;
+  const trimmed = raw.trim();
+  if (!/^[0-9]+$/.test(trimmed)) {
+    throw new Error(
+      `readonly-tools: MOMUS_PI_MAX_TOKENS invalid (got '${raw}'); ` +
+        `must be a positive integer.`,
+    );
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `readonly-tools: MOMUS_PI_MAX_TOKENS invalid (got '${raw}'); ` +
+        `must be a positive integer.`,
+    );
+  }
+  return value;
+}
+
 // `MOMUS_WORK_DIR` is set by the orchestrator (momus/invoke_pi.py) to
 // the work_dir's path relative to repo_root (e.g. ".momus"). Pi runs
 // with cwd=repo_root, so write_output's allowed prefix follows the
@@ -223,6 +266,41 @@ export function lookupModelCost(modelId: string): {
     }
   }
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+/**
+ * Look up a model's real context window and output cap in pi-ai's bundled
+ * registry, using the same scan-every-provider strategy as
+ * `lookupModelCost`.
+ *
+ * The provider registration below used to hard-code `contextWindow: 128000`
+ * and `maxTokens: 8192` for whatever model LLM_MODEL named. Both numbers
+ * were badly wrong for the model actually in production: pi-ai records
+ * 1048576 / 384000 for `deepseek/deepseek-v4-pro`. The understated output
+ * cap terminated phase 2's message with stopReason "length" while it was
+ * still reasoning, so it never reached `write_output`; the understated
+ * window made pi compact against a threshold the real model was nowhere
+ * near. Sourcing both from the registry keeps them right as models change.
+ *
+ * The fallback pair applies only to a model the registry does not know. It
+ * keeps the previous window (conservative: compacting early is wasteful,
+ * not wrong) but raises the output cap, because an output cap that is too
+ * low fails the run outright.
+ *
+ * Exported for tests.
+ */
+export function lookupModelLimits(modelId: string): {
+  contextWindow: number;
+  maxTokens: number;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id === modelId && m.contextWindow && m.maxTokens) {
+        return { contextWindow: m.contextWindow, maxTokens: m.maxTokens };
+      }
+    }
+  }
+  return { contextWindow: 128000, maxTokens: DEFAULT_MAX_TOKENS };
 }
 
 function toolError(reason: ErrorReason, path: string) {
@@ -1120,6 +1198,14 @@ export default function (pi: ExtensionAPI) {
   // If no match, fall back to zeros and momus suppresses the cost line —
   // tokens still surface so a magnitude check is possible.
   const cost = lookupModelCost(model);
+  // Capacity comes from the same registry as pricing. MOMUS_PI_MAX_TOKENS
+  // overrides the output cap when a workflow needs to hold it down (a
+  // provider whose real ceiling is lower than the registry's, or a
+  // deliberate spend limit).
+  const limits = lookupModelLimits(model);
+  const maxTokens = process.env.MOMUS_PI_MAX_TOKENS
+    ? resolveMaxTokens(process.env.MOMUS_PI_MAX_TOKENS)
+    : limits.maxTokens;
   pi.registerProvider("byo", {
     name: "BYO (OpenAI-compatible)",
     baseUrl,
@@ -1132,8 +1218,8 @@ export default function (pi: ExtensionAPI) {
         reasoning: false,
         input: ["text"],
         cost,
-        contextWindow: 128000,
-        maxTokens: 8192,
+        contextWindow: limits.contextWindow,
+        maxTokens,
       },
     ],
   });

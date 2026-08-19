@@ -28,7 +28,9 @@ import {
   executeWriteOutput,
   isDeepSeekViaOpenRouter,
   lookupModelCost,
+  lookupModelLimits,
   rejectAbsoluteArgv,
+  resolveMaxTokens,
   rewriteThinkingSignaturesForDeepSeek,
   validateMomusWorkDir,
 } from "./readonly-tools.ts";
@@ -1189,5 +1191,54 @@ describe("validateMomusWorkDir", () => {
     expect(() => validateMomusWorkDir("foo;rm")).toThrow(
       /MOMUS_WORK_DIR invalid/,
     );
+  });
+});
+
+describe("resolveMaxTokens", () => {
+  // Three phase-2 runs on axiomantic/spellbook died because the model spent
+  // the whole 8192-token per-message budget on reasoning and never reached
+  // its write_output call. The cap is now sized by the caller.
+  test("defaults well above the 8192 that truncated phase 2", () => {
+    expect(resolveMaxTokens(undefined)).toBe(32768);
+    expect(resolveMaxTokens("")).toBe(32768);
+    expect(resolveMaxTokens("   ")).toBe(32768);
+  });
+
+  test("honors an explicit positive integer", () => {
+    expect(resolveMaxTokens("16384")).toBe(16384);
+    expect(resolveMaxTokens(" 65536 ")).toBe(65536);
+  });
+
+  test("rejects values that would silently disable the cap", () => {
+    for (const bad of ["0", "-1", "8k", "1.5", "abc"]) {
+      expect(() => resolveMaxTokens(bad)).toThrow(/MOMUS_PI_MAX_TOKENS invalid/);
+    }
+  });
+});
+
+describe("lookupModelLimits", () => {
+  // The provider registration hard-coded contextWindow 128000 / maxTokens
+  // 8192 for every model. For the model actually in production
+  // (deepseek/deepseek-v4-pro on OpenRouter) pi-ai's own registry records
+  // 1048576 / 384000, so the hard-coded pair understated the output budget
+  // by ~47x and the window by ~8x. The understated window is why pi kept
+  // firing `compaction_start reason=threshold`; the understated output
+  // budget is why phase 2 ran out of tokens mid-reasoning.
+  test("reads the real limits for the production model", () => {
+    const limits = lookupModelLimits("deepseek/deepseek-v4-pro");
+    expect(limits.contextWindow).toBeGreaterThan(128000);
+    expect(limits.maxTokens).toBeGreaterThan(8192);
+  });
+
+  test("falls back conservatively for a model not in the registry", () => {
+    const limits = lookupModelLimits("no-such-vendor/no-such-model");
+    expect(limits.contextWindow).toBe(128000);
+    expect(limits.maxTokens).toBe(32768);
+  });
+
+  test("an explicit MOMUS_PI_MAX_TOKENS still wins over the registry", () => {
+    // resolveMaxTokens is the override path; the registry value is only the
+    // default when the env var is unset.
+    expect(resolveMaxTokens("16384")).toBe(16384);
   });
 });
