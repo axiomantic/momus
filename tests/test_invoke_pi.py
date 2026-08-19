@@ -177,7 +177,13 @@ def test_retry_also_misses_file_raises(tmp_path: Path) -> None:
     assert state["calls"] == 2
     assert len(captured) == 2
     msg = str(exc_info.value)
-    assert msg == (f"phase {phase} did not produce expected output {expected_rel} after retry")
+    # Line 1 is what the PR rollup comment shows; the per-attempt detail
+    # below it is what the Actions log shows.
+    assert msg.splitlines()[0] == (
+        f"phase {phase} did not produce expected output {expected_rel} after retry"
+    )
+    assert "attempt 1: turns=0 stopReason=<none> write_output calls=0" in msg
+    assert "attempt 2: turns=0 stopReason=<none> write_output calls=0" in msg
 
     for args, kwargs in captured:
         run_mock.assert_call(args=args, kwargs=kwargs)
@@ -792,3 +798,218 @@ def test_summarize_usage_handles_missing_cost_fields(monkeypatch):
     assert u.input_tokens == 50
     assert u.output_tokens == 10
     assert u.model == "unknown-model"
+
+
+# --- Output-token-cap truncation (phase2 crash on axiomantic/spellbook) -----
+#
+# Observed three times: pi exits 0, the final assistant message carries
+# `stopReason: "length"` because the model burned its whole output budget on
+# reasoning tokens, and it therefore never emitted the `write_output` call.
+# The old guard reported only "did not produce expected output ... after
+# retry", which is true of every failure mode and diagnoses none of them.
+
+_LENGTH_STOP_STREAM = (
+    '{"type": "agent_start"}\n'
+    '{"type": "turn_start"}\n'
+    '{"type": "message_update", "assistantMessageEvent": '
+    '{"type": "thinking_end", "content": "MEDIUM: publish.py drops the redaction on retry"}}\n'
+    '{"type": "message_end", "message": {"role": "assistant", "stopReason": "length"}}\n'
+    '{"type": "turn_end"}\n'
+    '{"type": "agent_end"}\n'
+)
+
+
+def _length_stop_factory() -> tuple:
+    state = {"calls": 0}
+    captured: list[tuple[tuple, dict]] = []
+
+    def side_effect(*args, **kwargs):
+        state["calls"] += 1
+        captured.append((args, kwargs))
+        return _FakePopen(returncode=0, stdout_text=_LENGTH_STOP_STREAM)
+
+    return side_effect, state, captured
+
+
+def test_length_stop_names_the_output_cap_in_first_line(tmp_path: Path) -> None:
+    """A `length` stop must be named on line 1 of the error.
+
+    `__main__.main` surfaces only the first line of the exception to the PR
+    rollup comment, so a diagnosis buried on a later line never reaches the
+    person reading the failure.
+    """
+    phase = "phase2"
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
+    side_effect, state, captured = _length_stop_factory()
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+
+    assert state["calls"] == 2
+    first_line = str(exc_info.value).splitlines()[0]
+    assert "stopReason=length" in first_line
+    assert "MOMUS_PI_MAX_TOKENS" in first_line
+    # The rollup comment truncates at 240 chars; the diagnosis must fit.
+    assert len(first_line) <= 240
+
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_length_stop_reports_per_attempt_detail(tmp_path: Path) -> None:
+    phase = "phase2"
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
+    side_effect, _state, captured = _length_stop_factory()
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+
+    msg = str(exc_info.value)
+    assert "attempt 1:" in msg
+    assert "attempt 2:" in msg
+    # write_output was never called in either attempt; say so, because a
+    # partial write is a different failure with a different remedy.
+    assert "write_output calls=0" in msg
+
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_missing_output_salvages_last_assistant_message_per_attempt(
+    tmp_path: Path,
+) -> None:
+    """The last assistant message is written under outputs/ for salvage.
+
+    outputs/ is uploaded as a workflow artifact even on failure, so a crash
+    that loses findings.json still leaves the reasoning that produced the
+    findings recoverable without hand-mining a truncated Actions log.
+    """
+    phase = "phase2"
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
+    side_effect, _state, captured = _length_stop_factory()
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire, pytest.raises(PiInvocationError):
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+
+    for attempt in (1, 2):
+        salvage = work_dir / "outputs" / f"{phase}-attempt{attempt}-last-message.txt"
+        assert salvage.exists(), f"attempt {attempt} salvage file missing"
+        body = salvage.read_text(encoding="utf-8")
+        # Full text, not the 300-char log snippet.
+        assert "MEDIUM: publish.py drops the redaction on retry" in body
+        assert "stopReason: length" in body
+
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_generic_missing_output_still_reported_when_stop_reason_is_normal(
+    tmp_path: Path,
+) -> None:
+    """A plain missing-output failure keeps its original first line."""
+    phase = "phase2"
+    expected_rel = PHASE_EXPECTED_OUTPUTS[phase]
+    work_dir, repo_root = _setup_work_dir(tmp_path, phase)
+    side_effect, _state, captured = _fake_pi_factory(work_dir, expected_rel, write_on_calls=set())
+
+    run_mock = tripwire.mock.object(invoke_pi_mod.subprocess, "Popen")
+    run_mock.calls(side_effect).calls(side_effect)
+
+    with tripwire, pytest.raises(PiInvocationError) as exc_info:
+        invoke_pi_phase_with_retry(phase, work_dir, repo_root)
+
+    first_line = str(exc_info.value).splitlines()[0]
+    assert first_line == (
+        f"phase {phase} did not produce expected output {expected_rel} after retry"
+    )
+
+    for args, kwargs in captured:
+        run_mock.assert_call(args=args, kwargs=kwargs)
+
+
+def test_log_event_emits_assistant_stop_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """stopReason is the field that identifies a truncated turn.
+
+    Suppressing every message_end is what made the three observed crashes
+    undiagnosable from the Actions log.
+    """
+    event = {
+        "type": "message_end",
+        "message": {"role": "assistant", "stopReason": "length"},
+    }
+    assert "[momus.pi phase2] message_end stopReason=length" in _capture_log(event, capsys)
+
+
+def test_log_event_still_suppresses_uninteresting_message_end(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for quiet in (
+        {"type": "message_end"},
+        {"type": "message_end", "message": {"role": "user"}},
+        {"type": "message_end", "message": {"role": "assistant", "stopReason": "toolUse"}},
+        {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}},
+    ):
+        assert _capture_log(quiet, capsys) == "", f"should suppress: {quiet}"
+
+
+def test_emit_snippet_width_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("MOMUS_LOG_SNIPPET_CHARS", "20")
+    capsys.readouterr()
+    invoke_pi_mod._emit("phase2", "thinking", "x" * 500)
+    out = capsys.readouterr().err
+    assert "x" * 17 + "..." in out
+    assert "x" * 21 not in out
+
+
+def test_emit_snippet_width_defaults_to_300(capsys: pytest.CaptureFixture[str]) -> None:
+    capsys.readouterr()
+    invoke_pi_mod._emit("phase2", "thinking", "x" * 500)
+    out = capsys.readouterr().err
+    assert "x" * 297 + "..." in out
+
+
+def test_pi_env_forwards_max_tokens(monkeypatch, tmp_path):
+    """The extension reads MOMUS_PI_MAX_TOKENS to size the provider's cap.
+
+    The pi env is default-deny, so a key the extension needs must be on the
+    allowlist or it silently does not arrive.
+    """
+    monkeypatch.setenv("MOMUS_PI_MAX_TOKENS", "32768")
+    work_dir = tmp_path / "repo" / "work"
+    work_dir.mkdir(parents=True)
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path / "repo")
+    assert env["MOMUS_PI_MAX_TOKENS"] == "32768"
+
+
+def test_log_event_marks_tool_error_reported_on_the_result_object(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Pi puts isError on the result, not on the event.
+
+    Observed: a `spawn rg ENOENT` from bash_ro was logged as `tool_result`,
+    so a reviewer that had lost its search tool looked like one that had
+    used it successfully.
+    """
+    event = {
+        "type": "tool_execution_end",
+        "toolName": "bash_ro",
+        "result": {
+            "isError": True,
+            "content": [{"type": "text", "text": "spawn error: spawn rg ENOENT"}],
+        },
+    }
+    out = _capture_log(event, capsys)
+    assert "[momus.pi phase2] tool_error bash_ro: spawn error: spawn rg ENOENT" in out
