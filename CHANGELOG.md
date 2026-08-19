@@ -60,6 +60,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **CI type-checks the TypeScript extension.** Nothing type-checked
+  `momus/extensions/readonly-tools.ts`: the repo carried no
+  `tsconfig.json`, and bun strips types rather than checking them, so
+  `bun test` was green on code `tsc` rejects. Python had `mypy` in CI
+  and TypeScript had no equivalent, while the same file gained a
+  production crash fix and the model-registry lookup. A `tsconfig.json`
+  at `strict` now covers `momus/extensions/**/*.ts` and the
+  `typescript-tests` job runs `tsc --noEmit` before the suite. The
+  check found four real type errors, among them a `bash_ro` handler
+  whose unannotated `new Promise` widened its own return type to
+  `unknown` and left every other branch of that tool unchecked.
+
 - **CI runs the TypeScript extension suite.** `.github/workflows/ci.yml`
   ran ruff, mypy and pytest only, so the `bun test` assertions covering
   `momus/extensions/readonly-tools.ts` were local-only and could not

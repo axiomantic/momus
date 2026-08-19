@@ -50,7 +50,11 @@ jobs:
 
   # Separate job, not extra steps on lint-and-test: the TypeScript suite
   # shares no toolchain with the Python one, so pairing them would serialize
-  # it behind `uv sync` and merge two independent red signals into one.
+  # it behind `uv sync` and merge two independent red signals into one. The
+  # type check lives here rather than in a third job for the mirror-image
+  # reason: it shares this job's whole toolchain, since `typescript` and
+  # `@types/bun` are devDependencies of the same package.json that `npm ci`
+  # already installs below.
   typescript-tests:
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +72,15 @@ jobs:
         # package-lock.json; `npm install` could drift. There is no bun
         # lockfile, so `bun install` is deliberately not used here.
         run: npm ci --no-audit --no-fund
+
+      - name: Type check (tsc --noEmit)
+        # Runs before the suite: bun strips types rather than checking them, so
+        # `bun test` is green on code tsc rejects. `--no-install` pins the
+        # resolution to the tsc `npm ci` just installed; without it npx would
+        # silently fetch a different version from the registry when the local
+        # one is missing, and a checker running on the wrong input is the
+        # failure this step exists to prevent.
+        run: npx --no-install tsc --noEmit
 
       - name: Set up bun
         uses: oven-sh/setup-bun@v2

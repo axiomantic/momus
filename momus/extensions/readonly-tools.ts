@@ -376,7 +376,10 @@ export function lookupModelReasoning(modelId: string): {
       return {
         reasoning: m.reasoning ?? false,
         ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
-        compat: { ...DEVELOPER_ROLE_FLOOR, ...m.compat },
+        compat: {
+          ...DEVELOPER_ROLE_FLOOR,
+          ...(m.compat as Record<string, unknown> | undefined),
+        },
       };
     }
   }
@@ -404,7 +407,7 @@ export function buildByoModelEntry(modelId: string, maxTokensOverride?: number) 
   return {
     id: modelId,
     name: modelId,
-    input: ["text"],
+    input: ["text" as const],
     cost: lookupModelCost(modelId),
     contextWindow: limits.contextWindow,
     maxTokens: maxTokensOverride ?? limits.maxTokens,
@@ -1432,6 +1435,14 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Names what bash_ro resolves. Without it the bare `new Promise` infers
+  // `unknown`, which collapsed execute's whole return type and left every
+  // other branch of this tool unchecked.
+  type BashRoResult = {
+    content: { type: "text"; text: string }[];
+    details: unknown;
+    isError?: boolean;
+  };
   pi.registerTool({
     name: "bash_ro",
     label: "bash (read-only)",
@@ -1456,6 +1467,7 @@ export default function (pi: ExtensionAPI) {
         if (e instanceof RejectError) {
           return {
             content: [{ type: "text", text: `rejected: ${e.message}` }],
+            details: undefined,
             isError: true,
           };
         }
@@ -1464,6 +1476,7 @@ export default function (pi: ExtensionAPI) {
       if (argv.length === 0) {
         return {
           content: [{ type: "text", text: "rejected: empty command" }],
+          details: undefined,
           isError: true,
         };
       }
@@ -1477,6 +1490,7 @@ export default function (pi: ExtensionAPI) {
               text: `rejected: '${bin}' not in allowlist (${[...ALLOWED_BINS].join(", ")})`,
             },
           ],
+          details: undefined,
           isError: true,
         };
       }
@@ -1526,7 +1540,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      return await new Promise((resolveP) => {
+      return await new Promise<BashRoResult>((resolveP) => {
         const child = spawn(argv[0], argv.slice(1), {
           stdio: ["ignore", "pipe", "pipe"],
           env: scrubbedEnv(),

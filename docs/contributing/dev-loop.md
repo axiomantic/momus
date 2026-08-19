@@ -15,7 +15,9 @@ npm ci
 `uv sync --group dev` installs the runtime dependencies plus the dev
 group (`pytest`, `pytest-tripwire`, `ruff`, `mypy`, `pre-commit`).
 `npm ci` installs the pinned pi runtime
-(`@mariozechner/pi-coding-agent@0.72.1`) from `package-lock.json`.
+(`@mariozechner/pi-coding-agent@0.72.1`) from `package-lock.json`,
+plus the `typescript` and `@types/bun` devDependencies the TypeScript
+type check needs.
 Use `npm ci`, not `npm install`: the pin is intentional and the unit
 checks in `tests/integration/test_pi_tool_enforcement.py` will fail if
 it drifts.
@@ -68,12 +70,16 @@ The pi extension (`momus/extensions/readonly-tools.ts`) has its own
 test file. Run it with bun:
 
 ```
+npx --no-install tsc --noEmit
 bun test momus/extensions/readonly-tools.test.ts
 ```
 
-This is the test for cwd containment, realpath checks, and the
-`bash_ro` argv allowlist. If you change `readonly-tools.ts`, run this
-before pushing.
+`bun test` covers cwd containment, realpath checks, and the `bash_ro`
+argv allowlist. It does not check types: bun strips them, so the suite
+is green on code `tsc` rejects. That is what the `tsc --noEmit` line is
+for, and CI runs both. Settings live in `tsconfig.json` (`strict`, and
+only `momus/extensions/**/*.ts` in scope). If you change
+`readonly-tools.ts`, run both before pushing.
 
 ## Pre-commit
 

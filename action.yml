@@ -87,7 +87,10 @@ runs:
         # version recorded in package-lock.json (0.72.1), making the
         # action's behavior deterministic across runs. The pi binary is
         # available at ./node_modules/.bin/pi inside the action checkout.
-        npm ci --no-audit --no-fund
+        # `--omit=dev` keeps the type-checking devDependencies (typescript
+        # ships a platform-native binary) out of every production run; they
+        # are needed only by the CI type-check job.
+        npm ci --no-audit --no-fund --omit=dev
         ./node_modules/.bin/pi --version
         # Expose the locally-installed pi binary on PATH for the Run momus
         # step. Use $GITHUB_PATH (which GHA prepends to PATH for all later

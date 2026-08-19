@@ -1333,7 +1333,12 @@ describe("lookupModelReasoning", () => {
     expect(matches.length).toBeGreaterThan(0);
     // Every key the registry entry states survives verbatim; the lookup only
     // adds a floor under keys the entry leaves unstated.
-    expect(traits.compat).toMatchObject(matches[0].compat);
+    // Same deferred-conditional `compat` as in lookupModelReasoning: the
+    // `m.api === "openai-completions"` filter above proves the branch that
+    // the type cannot. A genuinely absent compat still fails the assertion.
+    expect(traits.compat).toMatchObject(
+      matches[0].compat as unknown as Record<string, unknown>,
+    );
     expect(traits.thinkingLevelMap).toEqual(matches[0].thinkingLevelMap);
   });
 
