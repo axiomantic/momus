@@ -4,6 +4,69 @@ All notable changes to momus are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Phase 2 no longer dies at the output token cap.** The `byo`
+  provider was registered with a hard-coded `contextWindow: 128000`
+  and `maxTokens: 8192` regardless of which model `LLM_MODEL` named.
+  Both were badly wrong for the model in production: pi-ai's own
+  registry records 1048576 and 384000 for
+  `deepseek/deepseek-v4-pro`. The output budget covers reasoning
+  tokens as well as visible output, so the model spent the whole 8192
+  reasoning, its message terminated with `stopReason: "length"` before
+  it reached `write_output`, and pi's agent loop treated a message
+  with no tool call as a finished agent and exited 0. Momus then
+  reported only "did not produce expected output
+  outputs/findings.json after retry", which is true of every failure
+  mode and diagnoses none of them. Observed three times on
+  `axiomantic/spellbook`. Both limits now come from the same registry
+  lookup that already supplied pricing, so they track the model
+  instead of drifting from it.
+- **Pi no longer compacts against a window the model is nowhere
+  near.** The same hard-coded `contextWindow: 128000` understated the
+  production model's window by roughly 8x, which is why runs ended on
+  `compaction_start reason=threshold`.
+- **The retry is no longer a re-run under identical conditions.** When
+  the first attempt was truncated, the retry prompt now tells the model
+  to keep its analysis short and call `write_output` early, instead of
+  appending a reminder that gives it more to reason about inside the
+  same budget.
+- **`rg` is installed on the runner.** `bash_ro`'s allowlist advertised
+  `rg`, but the hosted images do not ship it, so the reviewer lost a
+  turn to `spawn rg ENOENT` before falling back to `grep`.
+- **Failed tool calls are labelled as failures.** Pi reports `isError`
+  on the result object rather than on the event; momus read only the
+  event, so the `spawn rg ENOENT` above was logged as `tool_result`
+  rather than `tool_error`.
+
+### Added
+
+- **`MOMUS_PI_MAX_TOKENS`**: per-message output token cap for the `byo`
+  provider, for holding the registry-derived cap down. Defaults to the
+  registry value, or 32768 for an unknown model.
+- **`MOMUS_LOG_SNIPPET_CHARS`**: width of the per-event stderr
+  summaries. Default 300, the previously hard-coded value. A crash you
+  cannot diagnose from its own logs is a second defect.
+- **Salvage of a failed phase's final message.** When a phase ends
+  without its expected output, the last assistant message of each
+  attempt is written to
+  `outputs/<phase>-attempt<N>-last-message.txt`. `outputs/` is uploaded
+  as a run artifact even on failure, so analysis completed before the
+  crash stays recoverable without hand-mining a clipped Actions log.
+
+### Changed
+
+- **The missing-output error names its cause.** The first line, which
+  is what the PR rollup comment shows, now reports the stop reason and
+  the remedy; the lines below it carry per-attempt turn counts,
+  stop reasons, and `write_output` call counts for the Actions log.
+- **`message_end` stop reasons are logged** when they are neither
+  `stop` nor `toolUse`. Suppressing every `message_end` hid the one
+  field that distinguishes a model that chose to stop from one that
+  was cut off.
+
 ## [1.2.0] - 2026-05-06
 
 Composable review emphasis and sharper green-mirage discipline in
