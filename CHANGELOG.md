@@ -60,6 +60,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **CI runs the TypeScript extension suite.** `.github/workflows/ci.yml`
+  ran ruff, mypy and pytest only, so the `bun test` assertions covering
+  `momus/extensions/readonly-tools.ts` were local-only and could not
+  gate a pull request. A `typescript-tests` job now installs the pinned
+  npm dependencies with `npm ci` and runs `bun test` on a pinned bun,
+  so a failing TypeScript assertion fails the PR.
 - **`MOMUS_PI_MAX_TOKENS`**: per-message output token cap for the `byo`
   provider, for holding the registry-derived cap down. Defaults to the
   registry value, or 32768 for an unknown model.
