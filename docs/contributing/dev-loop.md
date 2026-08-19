@@ -35,7 +35,7 @@ uv run pytest -m 'not adversarial'
 ```
 
 The pytest default already excludes the adversarial mark
-(`addopts = -m 'not adversarial'` in `pyproject.toml`), so the bare
+(`addopts = -m 'not adversarial' -ra` in `pyproject.toml`), so the bare
 `uv run pytest` form does the same thing as the explicit
 `-m 'not adversarial'`. Keeping the mark in the command makes it
 obvious you are running the fast suite.
@@ -63,6 +63,13 @@ Targeted test runs are usually what you want. Match scope to change.
 
 Test marks are declared in `pyproject.toml` under
 `[tool.pytest.ini_options].markers`.
+
+`-ra` in the same `addopts` prints a short summary line for every
+non-passing outcome. A skipped test is otherwise a single `s` in the
+progress line and a zero exit, which reads identically to a test that
+ran. The integration test above skips whenever `LLM_API_KEY` is unset,
+including on every CI run, so the reason is now printed rather than
+inferred.
 
 ## TypeScript extension tests
 

@@ -93,6 +93,19 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **A skipped test now says so in the CI log.** `pytest` reported the
+  one opt-in integration test as a single `s` in the progress line and
+  exited 0, so `tests/integration/test_pi_tool_enforcement.py::
+  test_pi_rejects_disallowed_tool` skipping on every CI run for want of
+  `LLM_API_KEY` was indistinguishable from it passing. The skip is
+  intended and CI still does not run it, since that would need a live
+  API key; what was missing was any signal that it had not run. `-ra`
+  in the `addopts` of `pyproject.toml` now prints a short summary line
+  for every non-passing outcome, so a green run states which tests were
+  skipped and why. It sits in `addopts` rather than in the CI
+  invocation so the same reason text appears locally and in every
+  workflow that calls pytest.
+
 - **The missing-output error names its cause.** The first line, which
   is what the PR rollup comment shows, now reports the stop reason and
   the remedy; the lines below it carry per-attempt turn counts,
