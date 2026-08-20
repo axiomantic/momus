@@ -6,6 +6,8 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-20
+
 ### Fixed
 
 - **Phase 2 no longer dies at the output token cap.** The `byo`
