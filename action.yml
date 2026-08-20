@@ -60,6 +60,20 @@ runs:
         echo "::add-mask::$APP_TOKEN"
         echo "GH_TOKEN=$APP_TOKEN" >> "$GITHUB_ENV"
 
+    # bash_ro's ALLOWED_BINS advertises `rg`, but the GitHub-hosted runner
+    # images do not ship it. Because bash_ro spawns the binary directly
+    # rather than through a shell, a missing `rg` surfaces to the model as
+    # "spawn rg ENOENT" and costs a turn to recover from -- turns that come
+    # out of the same per-message output budget the review needs. Install it
+    # so the allowlist and the sandbox agree.
+    - name: Install ripgrep for bash_ro
+      shell: bash
+      run: |
+        if ! command -v rg >/dev/null 2>&1; then
+          sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+        fi
+        rg --version
+
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
@@ -73,7 +87,10 @@ runs:
         # version recorded in package-lock.json (0.72.1), making the
         # action's behavior deterministic across runs. The pi binary is
         # available at ./node_modules/.bin/pi inside the action checkout.
-        npm ci --no-audit --no-fund
+        # `--omit=dev` keeps the type-checking devDependencies (typescript
+        # ships a platform-native binary) out of every production run; they
+        # are needed only by the CI type-check job.
+        npm ci --no-audit --no-fund --omit=dev
         ./node_modules/.bin/pi --version
         # Expose the locally-installed pi binary on PATH for the Run momus
         # step. Use $GITHUB_PATH (which GHA prepends to PATH for all later

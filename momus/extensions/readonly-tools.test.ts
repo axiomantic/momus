@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { clampThinkingLevel, getModels, getProviders } from "@mariozechner/pi-ai";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,9 +27,13 @@ import {
   executeLsRepo,
   executeReadRepo,
   executeWriteOutput,
+  buildByoModelEntry,
   isDeepSeekViaOpenRouter,
   lookupModelCost,
+  lookupModelLimits,
+  lookupModelReasoning,
   rejectAbsoluteArgv,
+  resolveMaxTokens,
   rewriteThinkingSignaturesForDeepSeek,
   validateMomusWorkDir,
 } from "./readonly-tools.ts";
@@ -165,12 +170,15 @@ describe("end-to-end: pi-ai convertMessages emits reasoning_content", () => {
     return;
   }
 
-  // Minimal compat object that exercises the path our extension hits.
-  // Mirrors what pi-ai's detectCompat() returns for openrouter+byo —
-  // notably `requiresThinkingAsText: false` (so thinking blocks go to a
-  // signature-named field, not inlined into content), and
-  // `requiresReasoningContentOnAssistantMessages: false` (so the field is
-  // only present when the signature mapping puts it there).
+  // A NON-thinking compat/model pair, used to isolate the rewrite helper
+  // from the thinking-mode wire settings. It is deliberately not what momus
+  // registers: `requiresReasoningContentOnAssistantMessages: false` and
+  // `reasoning: false` between them disable pi-ai's reasoning_content stub,
+  // so these tests observe the rewrite helper and nothing else. The
+  // registered pair is covered separately below.
+  // `requiresThinkingAsText: false` keeps thinking blocks in a
+  // signature-named field rather than inlined into content, which is the
+  // behaviour the rewrite helper acts on.
   const compat = {
     supportsStore: true,
     supportsDeveloperRole: true,
@@ -277,11 +285,13 @@ describe("end-to-end: pi-ai convertMessages emits reasoning_content", () => {
     expect(assistant.tool_calls[0].function.name).toBe("read");
   });
 
-  test("WITH rewrite + non-thinking conversation: no reasoning_content emitted", () => {
+  test("WITH rewrite + non-thinking model/compat: rewrite adds no reasoning_content", () => {
     // Non-thinking model: assistant message has only text + tool calls.
-    // The rewrite is a no-op (nothing to mutate); convertMessages emits
-    // no `reasoning_content` field, matching DeepSeek's contract for
-    // non-thinking turns.
+    // The rewrite is a no-op (nothing to mutate), and with reasoning:false
+    // pi-ai's reasoning_content stub is gated off, so convertMessages emits
+    // no `reasoning_content` field. This pins the rewrite helper's
+    // no-op property; it is NOT a claim about momus's registered model,
+    // which does enable reasoning (see the next test).
     const messages = [
       { role: "user", content: [{ type: "text", text: "list files" }] },
       {
@@ -310,6 +320,45 @@ describe("end-to-end: pi-ai convertMessages emits reasoning_content", () => {
     expect(assistant).toBeDefined();
     expect(assistant.reasoning_content).toBeUndefined();
     expect(assistant.reasoning).toBeUndefined();
+  });
+
+  test("REGISTERED entry + non-thinking turn: emits the reasoning_content stub", () => {
+    // The same non-thinking conversation as above, but run against the model
+    // entry the extension actually registers and the compat the registry
+    // ships with it. DeepSeek's thinking mode requires reasoning_content on
+    // every replayed assistant message, including turns that produced no
+    // thinking block; pi-ai supplies an empty string for those. Without this
+    // stub the next turn is rejected with error 20015.
+    const registered = buildByoModelEntry("deepseek/deepseek-v4-pro");
+    // getCompat() is not exported, but it resolves each field as
+    // `model.compat.<field> ?? detected.<field>`, which for an override
+    // object with only defined keys is a plain spread over the detected base.
+    const resolvedCompat = { ...compat, ...registered.compat };
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "list files" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "call_ls", name: "ls_repo", arguments: { path: "." } },
+        ],
+        api: "openai-completions",
+        provider: "byo",
+        model: "deepseek/deepseek-v4-pro",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "toolUse",
+        timestamp: 1,
+      },
+    ];
+    rewriteThinkingSignaturesForDeepSeek(messages);
+    const context = { messages, tools: [], system: "" };
+    const out = convertMessages(registered, context, resolvedCompat);
+    const assistant = out.find((m: any) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant.reasoning_content).toBe("");
+    // The wrong field name is still never used.
+    expect(assistant.reasoning).toBeUndefined();
+    expect(assistant.tool_calls).toHaveLength(1);
   });
 });
 
@@ -1189,5 +1238,168 @@ describe("validateMomusWorkDir", () => {
     expect(() => validateMomusWorkDir("foo;rm")).toThrow(
       /MOMUS_WORK_DIR invalid/,
     );
+  });
+});
+
+describe("resolveMaxTokens", () => {
+  // Three phase-2 runs on axiomantic/spellbook died because the model spent
+  // the whole 8192-token per-message budget on reasoning and never reached
+  // its write_output call. The cap is now sized by the caller.
+  test("defaults well above the 8192 that truncated phase 2", () => {
+    expect(resolveMaxTokens(undefined)).toBe(32768);
+    expect(resolveMaxTokens("")).toBe(32768);
+    expect(resolveMaxTokens("   ")).toBe(32768);
+  });
+
+  test("honors an explicit positive integer", () => {
+    expect(resolveMaxTokens("16384")).toBe(16384);
+    expect(resolveMaxTokens(" 65536 ")).toBe(65536);
+  });
+
+  test("rejects values that would silently disable the cap", () => {
+    for (const bad of ["0", "-1", "8k", "1.5", "abc"]) {
+      expect(() => resolveMaxTokens(bad)).toThrow(/MOMUS_PI_MAX_TOKENS invalid/);
+    }
+  });
+});
+
+describe("lookupModelLimits", () => {
+  // The provider registration hard-coded contextWindow 128000 / maxTokens
+  // 8192 for every model. For the model actually in production
+  // (deepseek/deepseek-v4-pro on OpenRouter) pi-ai's own registry records
+  // 1048576 / 384000, so the hard-coded pair understated the output budget
+  // by ~47x and the window by ~8x. The understated window is why pi kept
+  // firing `compaction_start reason=threshold`; the understated output
+  // budget is why phase 2 ran out of tokens mid-reasoning.
+  test("reads the real limits for the production model", () => {
+    const limits = lookupModelLimits("deepseek/deepseek-v4-pro");
+    expect(limits.contextWindow).toBeGreaterThan(128000);
+    expect(limits.maxTokens).toBeGreaterThan(8192);
+  });
+
+  test("falls back conservatively for a model not in the registry", () => {
+    const limits = lookupModelLimits("no-such-vendor/no-such-model");
+    expect(limits.contextWindow).toBe(128000);
+    expect(limits.maxTokens).toBe(32768);
+  });
+
+  test("an explicit MOMUS_PI_MAX_TOKENS still wins over the registry", () => {
+    // resolveMaxTokens is the override path; the registry value is only the
+    // default when the env var is unset.
+    expect(resolveMaxTokens("16384")).toBe(16384);
+  });
+});
+
+describe("lookupModelReasoning", () => {
+  // `reasoning` is a wire-level gate, not a display hint: every thinking
+  // branch in pi-ai's buildParams is guarded by `&& model.reasoning`, so a
+  // hand-set `false` means no reasoning field is sent at all and the
+  // provider default decides. The registry says `true` for the production
+  // model, and it says so alongside a `thinkingLevelMap` that rules out the
+  // levels the model does not accept. Carrying `reasoning` without that map
+  // would send pi's default level ("medium"), which the map records as
+  // unsupported (null). The three fields only make sense together.
+  test("carries reasoning, thinkingLevelMap and compat for the production model", () => {
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    expect(traits.reasoning).toBe(true);
+    // The map must be present, and it must be the one that rules out the
+    // default level, otherwise the clamp below cannot fire.
+    expect(traits.thinkingLevelMap).toBeDefined();
+    expect(traits.thinkingLevelMap!.medium).toBeNull();
+    expect(traits.thinkingLevelMap!.high).toBe("high");
+    // DeepSeek rejects a follow-up turn whose assistant message omits
+    // reasoning_content once thinking is on (error 20015). The registry
+    // encodes that as compat; detectCompat() cannot infer it here because
+    // the provider is named "byo" and the base URL is OpenRouter's.
+    expect(traits.compat).toBeDefined();
+    expect(traits.compat!.requiresReasoningContentOnAssistantMessages).toBe(true);
+  });
+
+  test("matches only an openai-completions entry", () => {
+    // The same model id is registered under several providers, and at least
+    // one of them (vercel-ai-gateway) uses the anthropic-messages API with a
+    // different compat contract. The byo provider registers
+    // api: "openai-completions", so copying compat from an entry for another
+    // API would be actively wrong rather than merely imprecise.
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    const matches = [];
+    for (const provider of getProviders()) {
+      for (const m of getModels(provider)) {
+        if (m.id === "deepseek/deepseek-v4-pro" && m.api === "openai-completions") {
+          matches.push(m);
+        }
+      }
+    }
+    expect(matches.length).toBeGreaterThan(0);
+    // Every key the registry entry states survives verbatim; the lookup only
+    // adds a floor under keys the entry leaves unstated.
+    // Same deferred-conditional `compat` as in lookupModelReasoning: the
+    // `m.api === "openai-completions"` filter above proves the branch that
+    // the type cannot. A genuinely absent compat still fails the assertion.
+    expect(traits.compat).toMatchObject(
+      matches[0].compat as unknown as Record<string, unknown>,
+    );
+    expect(traits.thinkingLevelMap).toEqual(matches[0].thinkingLevelMap);
+  });
+
+  test("holds the system prompt at role: system when reasoning turns on", () => {
+    // pi-ai reads compat.supportsDeveloperRole only when model.reasoning is
+    // true, so enabling reasoning is what exposes it. Pinned pi-ai 0.72.1
+    // auto-detects it as true for an OpenRouter URL under the "byo" provider
+    // name, which would silently switch the system message to
+    // role: "developer" -- a role DeepSeek does not accept, and a change
+    // that has nothing to do with thinking mode. The floor pins it false.
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    expect(traits.compat!.supportsDeveloperRole).toBe(false);
+  });
+
+
+
+  test("falls back to non-reasoning for a model not in the registry", () => {
+    const traits = lookupModelReasoning("no-such-vendor/no-such-model");
+    expect(traits.reasoning).toBe(false);
+    expect(traits.thinkingLevelMap).toBeUndefined();
+    // Only the floor; nothing is invented for a model the registry
+    // does not describe.
+    expect(traits.compat).toEqual({ supportsDeveloperRole: false });
+  });
+});
+
+describe("buildByoModelEntry", () => {
+  // These assert the composed entry the extension actually registers, not a
+  // hand-copied stand-in. A stand-in would keep passing after the
+  // registration drifted away from it.
+  test("the registered entry enables reasoning for the production model", () => {
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro");
+    expect(entry.reasoning).toBe(true);
+    expect(entry.compat).toBeDefined();
+    expect(entry.thinkingLevelMap).toBeDefined();
+  });
+
+  test("pi's default thinking level clamps up to a level the model accepts", () => {
+    // pi-coding-agent's DEFAULT_THINKING_LEVEL is "medium" and momus passes
+    // no --thinking flag, so "medium" is what pi asks for. clampThinkingLevel
+    // reads model.thinkingLevelMap; without the map it would hand "medium"
+    // straight through to the wire, and the registry records "medium" as
+    // unsupported for this model.
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro");
+    const clamped = clampThinkingLevel(entry as any, "medium");
+    expect(clamped).not.toBe("medium");
+    expect(clamped).toBe("high");
+  });
+
+  test("an unknown model registers as non-reasoning", () => {
+    const entry = buildByoModelEntry("no-such-vendor/no-such-model");
+    expect(entry.reasoning).toBe(false);
+    expect(entry).not.toHaveProperty("thinkingLevelMap");
+    expect(entry.compat).toEqual({ supportsDeveloperRole: false });
+  });
+
+  test("an explicit maxTokens override still wins over the registry", () => {
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro", 16384);
+    expect(entry.maxTokens).toBe(16384);
+    // The override must not disturb the other registry-sourced fields.
+    expect(entry.reasoning).toBe(true);
+    expect(entry.contextWindow).toBeGreaterThan(128000);
   });
 });

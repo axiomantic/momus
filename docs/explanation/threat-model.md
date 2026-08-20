@@ -27,7 +27,7 @@ Containment in momus is layered. No single mechanism is asked to be sufficient o
 
 ### Environment allowlist
 
-`momus/invoke_pi.py:82-118` implements default-deny env passthrough into pi. The always-allowed set is `PATH`, `HOME`, `TMPDIR`, `LANG`, `LANGUAGE`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, plus any `LC_*` key. `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `ACTIONS_RUNTIME_TOKEN` are explicitly scrubbed. Reserved-from-passthrough: `MOMUS_WORK_DIR`, `MOMUS_PI_ENV_PASSTHROUGH`, `MOMUS_TOOLCALL_LOG`.
+`momus/invoke_pi.py:82-118` implements default-deny env passthrough into pi. The always-allowed set is `PATH`, `HOME`, `TMPDIR`, `LANG`, `LANGUAGE`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`, `MOMUS_PI_MAX_TOKENS`, plus any `LC_*` key. `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `ACTIONS_RUNTIME_TOKEN` are explicitly scrubbed. Reserved-from-passthrough: `MOMUS_WORK_DIR`, `MOMUS_PI_ENV_PASSTHROUGH`, `MOMUS_TOOLCALL_LOG`.
 
 The allowlist is user-extensible via `MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2`. Names must match `^[A-Z][A-Z0-9_]*$`. The escape hatch is documented because users will find it anyway, but it is exactly that: an escape hatch. Anything you pass through bypasses the hardening that prevents prompt-injected pi runs from reading credentials from sibling env vars. See `../how-to/extend-env-passthrough.md`.
 

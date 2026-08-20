@@ -99,8 +99,20 @@ PI_ENV_ALWAYS_ALLOW: frozenset[str] = frozenset(
         "LLM_BASE_URL",
         "LLM_MODEL",
         "LLM_API_KEY",
+        # Read by momus/extensions/readonly-tools.ts to size the "byo"
+        # provider's per-message output cap. The default-deny env means a
+        # key the extension needs but that is absent from this set does not
+        # arrive and the extension silently falls back to its own default.
+        "MOMUS_PI_MAX_TOKENS",
     }
 )
+
+# Width of the one-line event summaries written to stderr. The three
+# observed phase-2 crashes were diagnosed only after the fact because the
+# reasoning block that named the cause was clipped here; raise this when
+# reproducing a failure.
+LOG_SNIPPET_CHARS_ENV = "MOMUS_LOG_SNIPPET_CHARS"
+DEFAULT_LOG_SNIPPET_CHARS = 300
 
 # Any LC_* key passes (locale categories: LC_ALL, LC_CTYPE, LC_MESSAGES, ...).
 PI_ENV_LC_PREFIX = "LC_"
@@ -287,6 +299,88 @@ def _find_provider_error(events: list[dict]) -> str | None:
     return None
 
 
+# A phase whose final assistant message stopped for this reason ran out of
+# output tokens mid-message. Pi's agent loop sees a message with no tool
+# call and treats the agent as finished, so pi exits 0 and the phase looks
+# like a model that simply declined to write its output file.
+TRUNCATING_STOP_REASON = "length"
+
+# Stop reasons that are part of normal operation and not worth a log line.
+_QUIET_STOP_REASONS: frozenset[str] = frozenset({"stop", "toolUse"})
+
+
+@dataclass(frozen=True)
+class PhaseOutcome:
+    """What a phase's event stream says about how the phase ended.
+
+    Built from the parsed stream so a missing-output failure can name its
+    cause instead of reporting only that the file is absent, which is true
+    of every failure mode and distinguishes none of them.
+    """
+
+    stop_reason: str | None
+    n_turns: int
+    n_write_output_calls: int
+    last_assistant_text: str
+
+    @property
+    def truncated(self) -> bool:
+        return self.stop_reason == TRUNCATING_STOP_REASON
+
+
+def summarize_outcome(events: Iterable[dict]) -> PhaseOutcome:
+    """Derive a PhaseOutcome from a pi event stream.
+
+    ``stop_reason`` is taken from the LAST assistant ``message_end``: that is
+    the message whose termination decided whether the agent loop continued,
+    so it is the one that explains a phase that ended without its output.
+    """
+    stop_reason: str | None = None
+    n_turns = 0
+    n_write_output = 0
+    # Blocks of the message currently being streamed; snapshotted into
+    # `last_text` when that message ends, so the result is the final
+    # message's own content rather than an accumulation across the phase.
+    current: list[str] = []
+    last_text = ""
+    for ev in events:
+        et = ev.get("type")
+        if et == "turn_end":
+            n_turns += 1
+            continue
+        if et == "message_end":
+            msg = ev.get("message") or {}
+            if msg.get("role") == "assistant":
+                reason = msg.get("stopReason")
+                stop_reason = str(reason) if reason is not None else None
+                last_text = "\n\n".join(current)
+                current = []
+            continue
+        if et == "message_update":
+            sub = ev.get("assistantMessageEvent") or {}
+            sub_type = sub.get("type")
+            if sub_type in ("text_end", "thinking_end"):
+                content = sub.get("content") or ""
+                if content:
+                    label = "assistant" if sub_type == "text_end" else "thinking"
+                    current.append(f"[{label}]\n{content}")
+            elif sub_type == "toolcall_end":
+                tc = sub.get("toolCall") or {}
+                if tc.get("name") == "write_output":
+                    n_write_output += 1
+            continue
+    # A stream that ended without a closing assistant message_end (pi killed
+    # mid-message) still has content worth keeping.
+    if current and not last_text:
+        last_text = "\n\n".join(current)
+    return PhaseOutcome(
+        stop_reason=stop_reason,
+        n_turns=n_turns,
+        n_write_output_calls=n_write_output,
+        last_assistant_text=last_text,
+    )
+
+
 def _parse_one_line(line: str) -> dict:
     if not line.strip():
         return {"type": "_blank"}
@@ -308,7 +402,23 @@ def _log_event(phase: str, event: dict, raw: str) -> None:
     Schema reference: pi-mono coding-agent rpc.md.
     """
     et = event.get("type", "?")
-    if et in ("_blank", "message_start", "message_end"):
+    if et in ("_blank", "message_start"):
+        return
+    if et == "message_end":
+        # Only the assistant's terminal stop reason is worth a line, and
+        # only when it is not the ordinary "stop"/"toolUse" pair. This is
+        # the field that distinguishes a model which chose to stop from one
+        # that was cut off at its output cap; suppressing every message_end
+        # is what made the observed phase-2 crashes undiagnosable.
+        msg = event.get("message") or {}
+        reason = msg.get("stopReason")
+        if msg.get("role") != "assistant" or not reason or reason in _QUIET_STOP_REASONS:
+            return
+        detail = f"[momus.pi {phase}] message_end stopReason={reason}"
+        err = msg.get("errorMessage")
+        if err:
+            detail += f" errorMessage={err}"
+        print(detail, file=sys.stderr, flush=True)
         return
     if et == "_unparsed":
         print(f"[momus.pi {phase}] (raw) {raw[:300]}", file=sys.stderr, flush=True)
@@ -352,8 +462,12 @@ def _log_event(phase: str, event: dict, raw: str) -> None:
 
     if et == "tool_execution_end":
         name = event.get("toolName", "?")
-        is_error = bool(event.get("isError"))
         result = event.get("result") or {}
+        # Pi carries isError on the result object, not on the event. Reading
+        # only the event mislabels every failed tool call as a success: an
+        # observed `spawn rg ENOENT` logged as `tool_result`, not
+        # `tool_error`. Accept either position.
+        is_error = bool(event.get("isError") or result.get("isError"))
         text = _extract_result_text(result)
         label = f"tool_error {name}" if is_error else f"tool_result {name}"
         _emit(phase, label, text)
@@ -386,12 +500,23 @@ def _log_event(phase: str, event: dict, raw: str) -> None:
     print(f"[momus.pi {phase}] {et}", file=sys.stderr, flush=True)
 
 
+def _snippet_chars() -> int:
+    """Width of the stderr event snippets, overridable per run."""
+    raw = os.environ.get(LOG_SNIPPET_CHARS_ENV, "")
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_LOG_SNIPPET_CHARS
+    return value if value > 0 else DEFAULT_LOG_SNIPPET_CHARS
+
+
 def _emit(phase: str, label: str, text: str) -> None:
     snippet = (text or "").strip().replace("\n", " \\n ")
     if not snippet:
         return
-    if len(snippet) > 300:
-        snippet = snippet[:297] + "..."
+    width = _snippet_chars()
+    if len(snippet) > width:
+        snippet = snippet[: max(width - 3, 1)] + "..."
     print(f"[momus.pi {phase}] {label}: {snippet}", file=sys.stderr, flush=True)
 
 
@@ -448,8 +573,15 @@ def invoke_pi_phase_with_retry(
     if expected_path.exists():
         return events
 
-    # The model likely returned prose instead of calling write_output. Nudge
-    # it once with an explicit reminder; keep the suffix terse on purpose.
+    first = summarize_outcome(events)
+    _salvage_last_message(phase, 1, work_dir, first)
+
+    # The model either returned prose instead of calling write_output, or was
+    # cut off at its output cap before it got there. Nudge it once. When the
+    # first attempt was truncated, an ordinary "you forgot" reminder makes
+    # things worse (more to reason about inside the same budget), so tell it
+    # to spend the budget on the file rather than on analysis.
+    #
     # The reminder cites the path relative to pi's CWD (repo_root) so the
     # path the model must pass to write_output matches the path in the
     # reminder verbatim.
@@ -462,6 +594,14 @@ def invoke_pi_phase_with_retry(
         "this file. Do NOT respond with prose only; call `write_output` "
         "before ending your turn."
     )
+    if first.truncated:
+        suffix += (
+            " Your previous attempt ran out of output tokens while reasoning "
+            "and never reached the tool call. Keep analysis short, investigate "
+            "no further than you must, and call `write_output` EARLY: a "
+            "partial findings file is worth more than a complete analysis you "
+            "never write down."
+        )
     retry_events = invoke_pi_phase(
         phase,
         work_dir,
@@ -473,10 +613,90 @@ def invoke_pi_phase_with_retry(
     # for tokens consumed on the failed first attempt AND the retry.
     events = events + retry_events
     if not expected_path.exists():
-        raise PiInvocationError(
-            f"phase {phase} did not produce expected output {expected_rel} after retry"
-        )
+        second = summarize_outcome(retry_events)
+        _salvage_last_message(phase, 2, work_dir, second)
+        raise PiInvocationError(_missing_output_message(phase, expected_rel, first, second))
     return events
+
+
+def _missing_output_message(
+    phase: str,
+    expected_rel: str,
+    first: PhaseOutcome,
+    second: PhaseOutcome,
+) -> str:
+    """Build the missing-output error.
+
+    ``__main__.main`` surfaces only the FIRST LINE of this message to the PR
+    rollup comment (truncated at 240 chars), so any diagnosis that does not
+    fit on line 1 never reaches the person reading the failure. Per-attempt
+    detail goes on the lines below, which reach the Actions log.
+    """
+    headline = f"phase {phase} did not produce expected output {expected_rel} after retry"
+    truncated = [n for n, o in ((1, first), (2, second)) if o.truncated]
+    if truncated:
+        which = "both attempts" if len(truncated) == 2 else f"attempt {truncated[0]}"
+        headline += (
+            f" ({which} ended with stopReason={TRUNCATING_STOP_REASON}: the model spent its "
+            "whole per-message output budget before calling write_output; raise "
+            "MOMUS_PI_MAX_TOKENS)"
+        )
+    lines = [headline]
+    for n, outcome in ((1, first), (2, second)):
+        lines.append(
+            f"  attempt {n}: turns={outcome.n_turns} "
+            f"stopReason={outcome.stop_reason or '<none>'} "
+            f"write_output calls={outcome.n_write_output_calls}"
+        )
+    lines.append(
+        f"  last assistant message of each attempt saved to "
+        f"outputs/{phase}-attempt<N>-last-message.txt (uploaded as a run artifact)"
+    )
+    return "\n".join(lines)
+
+
+def _salvage_last_message(
+    phase: str,
+    attempt: int,
+    work_dir: Path,
+    outcome: PhaseOutcome,
+) -> None:
+    """Persist a failed attempt's final assistant message under outputs/.
+
+    outputs/ is uploaded as a workflow artifact even when the run fails, so
+    whatever analysis the model completed before it died stays recoverable.
+    Without this the only record is the stderr log, whose per-event snippets
+    are clipped to `_snippet_chars()` and cannot be reassembled.
+
+    Best-effort: a failure to write the salvage file must not replace the
+    real error with an IO error.
+    """
+    if not outcome.last_assistant_text:
+        return
+    path = work_dir / "outputs" / f"{phase}-attempt{attempt}-last-message.txt"
+    body = (
+        f"phase: {phase}\n"
+        f"attempt: {attempt}\n"
+        f"stopReason: {outcome.stop_reason or '<none>'}\n"
+        f"turns: {outcome.n_turns}\n"
+        f"write_output calls: {outcome.n_write_output_calls}\n"
+        f"---\n{outcome.last_assistant_text}\n"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"[momus.pi {phase}] could not save salvage file {path}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    print(
+        f"[momus.pi {phase}] saved attempt {attempt} final message to {path}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _build_pi_command(prompt: str, tools: list[str]) -> list[str]:

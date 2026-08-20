@@ -84,6 +84,49 @@ export function validateMomusWorkDir(value: string | undefined): void {
 
 validateMomusWorkDir(process.env.MOMUS_WORK_DIR);
 
+/**
+ * Per-message output token cap for the "byo" provider.
+ *
+ * This budget covers reasoning tokens as well as visible output. Phase 2's
+ * job is to reason over a diff and then emit findings.json through
+ * write_output, so a cap sized for the answer alone starves the tool call:
+ * the message terminates with stopReason "length" mid-reasoning, pi's agent
+ * loop sees a message with no tool call and declares the agent finished,
+ * and pi exits 0 having written nothing. The orchestrator's retry then
+ * re-runs against the same cap and dies the same way.
+ *
+ * The previous value of 8192 did exactly that on three consecutive runs
+ * against axiomantic/spellbook. 32768 leaves room for a long analysis plus
+ * the findings document; override per workflow with MOMUS_PI_MAX_TOKENS.
+ */
+const DEFAULT_MAX_TOKENS = 32768;
+
+/**
+ * Parse MOMUS_PI_MAX_TOKENS. Throws on a value that is not a positive
+ * integer rather than falling back to the default: a typo that silently
+ * restores a starving cap reproduces the bug this setting exists to fix.
+ *
+ * Exported for tests.
+ */
+export function resolveMaxTokens(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_TOKENS;
+  const trimmed = raw.trim();
+  if (!/^[0-9]+$/.test(trimmed)) {
+    throw new Error(
+      `readonly-tools: MOMUS_PI_MAX_TOKENS invalid (got '${raw}'); ` +
+        `must be a positive integer.`,
+    );
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(
+      `readonly-tools: MOMUS_PI_MAX_TOKENS invalid (got '${raw}'); ` +
+        `must be a positive integer.`,
+    );
+  }
+  return value;
+}
+
 // `MOMUS_WORK_DIR` is set by the orchestrator (momus/invoke_pi.py) to
 // the work_dir's path relative to repo_root (e.g. ".momus"). Pi runs
 // with cwd=repo_root, so write_output's allowed prefix follows the
@@ -223,6 +266,153 @@ export function lookupModelCost(modelId: string): {
     }
   }
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+/**
+ * Look up a model's real context window and output cap in pi-ai's bundled
+ * registry, using the same scan-every-provider strategy as
+ * `lookupModelCost`.
+ *
+ * The provider registration below used to hard-code `contextWindow: 128000`
+ * and `maxTokens: 8192` for whatever model LLM_MODEL named. Both numbers
+ * were badly wrong for the model actually in production: pi-ai records
+ * 1048576 / 384000 for `deepseek/deepseek-v4-pro`. The understated output
+ * cap terminated phase 2's message with stopReason "length" while it was
+ * still reasoning, so it never reached `write_output`; the understated
+ * window made pi compact against a threshold the real model was nowhere
+ * near. Sourcing both from the registry keeps them right as models change.
+ *
+ * The fallback pair applies only to a model the registry does not know. It
+ * keeps the previous window (conservative: compacting early is wasteful,
+ * not wrong) but raises the output cap, because an output cap that is too
+ * low fails the run outright.
+ *
+ * Exported for tests.
+ */
+export function lookupModelLimits(modelId: string): {
+  contextWindow: number;
+  maxTokens: number;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id === modelId && m.contextWindow && m.maxTokens) {
+        return { contextWindow: m.contextWindow, maxTokens: m.maxTokens };
+      }
+    }
+  }
+  return { contextWindow: 128000, maxTokens: DEFAULT_MAX_TOKENS };
+}
+
+/**
+ * A floor under the compat pi-ai auto-detects for the "byo" registration,
+ * applied beneath the registry's own compat so a registry entry that states
+ * a value still wins.
+ *
+ * `supportsDeveloperRole` gates whether the system prompt is sent as
+ * `role: "developer"` instead of `role: "system"`, and pi-ai reads it only
+ * when `model.reasoning` is true. Detection cannot get this right for
+ * momus: the provider is registered under the name "byo", so pi-ai falls
+ * back to URL sniffing, and pinned pi-ai 0.72.1 computes
+ * `supportsDeveloperRole: !isNonStandard`, which is true for an OpenRouter
+ * URL. Upstream later corrected this in two places at once, neither of
+ * which is in the pinned version: 0.84.1's detection excludes OpenRouter
+ * unless the model id is an anthropic/ or openai/ one, and 0.84.1's
+ * registry entry for the production model states
+ * `supportsDeveloperRole: false` outright.
+ *
+ * The flag was unreachable while `reasoning` was hand-set to false, so
+ * enabling reasoning is what would expose it. DeepSeek accepts the system,
+ * user, assistant and tool roles; `developer` is an OpenAI-specific role
+ * and is not part of the change being made here, so the floor holds the
+ * system message at `role: "system"` and keeps the wire delta confined to
+ * the thinking-mode fields.
+ */
+const DEVELOPER_ROLE_FLOOR = { supportsDeveloperRole: false } as const;
+
+/**
+ * Look up the thinking-mode traits of a model in pi-ai's bundled registry:
+ * whether it reasons at all, which thinking levels it actually accepts, and
+ * the provider quirks that go with reasoning being on.
+ *
+ * The three travel together on purpose. `reasoning` is a wire-level gate,
+ * not a display hint: every thinking branch in pi-ai's `buildParams` is
+ * guarded by `&& model.reasoning`, so the registration's previous
+ * hand-written `reasoning: false` meant momus sent no reasoning field at all
+ * and whatever the provider defaults to decided how much the model thought.
+ * But `reasoning: true` on its own is also wrong. Pi asks for its default
+ * thinking level ("medium"; momus passes no --thinking flag) and
+ * `clampThinkingLevel` reads `thinkingLevelMap` to decide what the model can
+ * take. For deepseek/deepseek-v4-pro the registry maps "medium" to null, so
+ * with the map present the level clamps up to "high" and without it "medium"
+ * goes on the wire unchanged, which is the one value the registry says this
+ * model does not accept. `compat` completes the set: it carries
+ * `requiresReasoningContentOnAssistantMessages`, which pi-ai's detectCompat
+ * cannot infer here because momus registers the provider under the name
+ * "byo" against an OpenRouter base URL, so the DeepSeek probe misses.
+ *
+ * Matching is restricted to `openai-completions` entries. The same model id
+ * is registered under several providers and at least one of them uses the
+ * anthropic-messages API with a different compat contract; the byo provider
+ * registers `api: "openai-completions"`, so an entry for another API would
+ * describe a different wire format. This is stricter than `lookupModelCost`
+ * and `lookupModelLimits`, which take the first id match, because pricing
+ * and capacity are properties of the model while compat is a property of
+ * the model reached over a particular API.
+ *
+ * An unknown model falls back to the previous conservative behaviour: no
+ * reasoning and no thinking level map. It still gets the compat floor,
+ * which describes the registration rather than the model.
+ *
+ * Exported for tests.
+ */
+export function lookupModelReasoning(modelId: string): {
+  reasoning: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
+  compat: Record<string, unknown>;
+} {
+  for (const provider of getProviders()) {
+    for (const m of getModels(provider)) {
+      if (m.id !== modelId || m.api !== "openai-completions") continue;
+      return {
+        reasoning: m.reasoning ?? false,
+        ...(m.thinkingLevelMap ? { thinkingLevelMap: m.thinkingLevelMap } : {}),
+        compat: {
+          ...DEVELOPER_ROLE_FLOOR,
+          ...(m.compat as Record<string, unknown> | undefined),
+        },
+      };
+    }
+  }
+  // The floor applies to an unknown model too. It is inert while reasoning
+  // is off, but a correctness floor that depends on a separate gate staying
+  // shut is not a floor.
+  return { reasoning: false, compat: { ...DEVELOPER_ROLE_FLOOR } };
+}
+
+/**
+ * Compose the single model entry the "byo" provider registers, sourcing
+ * every field pi-ai reads from pi-ai's own registry rather than from
+ * hand-written literals here.
+ *
+ * `maxTokensOverride` is the MOMUS_PI_MAX_TOKENS escape hatch: a workflow
+ * needs it when the endpoint's real ceiling is below the registry's, or to
+ * cap spend deliberately.
+ *
+ * Exported so tests assert the entry that is actually registered. A test
+ * against a hand-copied stand-in keeps passing after the registration
+ * drifts away from it.
+ */
+export function buildByoModelEntry(modelId: string, maxTokensOverride?: number) {
+  const limits = lookupModelLimits(modelId);
+  return {
+    id: modelId,
+    name: modelId,
+    input: ["text" as const],
+    cost: lookupModelCost(modelId),
+    contextWindow: limits.contextWindow,
+    maxTokens: maxTokensOverride ?? limits.maxTokens,
+    ...lookupModelReasoning(modelId),
+  };
 }
 
 function toolError(reason: ErrorReason, path: string) {
@@ -1119,22 +1309,24 @@ export default function (pi: ExtensionAPI) {
   // "deepseek"). First match wins; in practice the pricing converges.
   // If no match, fall back to zeros and momus suppresses the cost line —
   // tokens still surface so a magnitude check is possible.
-  const cost = lookupModelCost(model);
+  //
+  // Capacity, thinking-mode traits and provider quirks come from that same
+  // lookup, so every field pi-ai reads tracks the model together instead of
+  // one of them being hand-set and drifting. MOMUS_PI_MAX_TOKENS overrides
+  // the output cap when a workflow needs to hold it down (a provider whose
+  // real ceiling is lower than the registry's, or a deliberate spend limit).
   pi.registerProvider("byo", {
     name: "BYO (OpenAI-compatible)",
     baseUrl,
     apiKey: "LLM_API_KEY",
     api: "openai-completions",
     models: [
-      {
-        id: model,
-        name: model,
-        reasoning: false,
-        input: ["text"],
-        cost,
-        contextWindow: 128000,
-        maxTokens: 8192,
-      },
+      buildByoModelEntry(
+        model,
+        process.env.MOMUS_PI_MAX_TOKENS
+          ? resolveMaxTokens(process.env.MOMUS_PI_MAX_TOKENS)
+          : undefined,
+      ),
     ],
   });
 
@@ -1243,6 +1435,14 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Names what bash_ro resolves. Without it the bare `new Promise` infers
+  // `unknown`, which collapsed execute's whole return type and left every
+  // other branch of this tool unchecked.
+  type BashRoResult = {
+    content: { type: "text"; text: string }[];
+    details: unknown;
+    isError?: boolean;
+  };
   pi.registerTool({
     name: "bash_ro",
     label: "bash (read-only)",
@@ -1267,6 +1467,7 @@ export default function (pi: ExtensionAPI) {
         if (e instanceof RejectError) {
           return {
             content: [{ type: "text", text: `rejected: ${e.message}` }],
+            details: undefined,
             isError: true,
           };
         }
@@ -1275,6 +1476,7 @@ export default function (pi: ExtensionAPI) {
       if (argv.length === 0) {
         return {
           content: [{ type: "text", text: "rejected: empty command" }],
+          details: undefined,
           isError: true,
         };
       }
@@ -1288,6 +1490,7 @@ export default function (pi: ExtensionAPI) {
               text: `rejected: '${bin}' not in allowlist (${[...ALLOWED_BINS].join(", ")})`,
             },
           ],
+          details: undefined,
           isError: true,
         };
       }
@@ -1337,7 +1540,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      return await new Promise((resolveP) => {
+      return await new Promise<BashRoResult>((resolveP) => {
         const child = spawn(argv[0], argv.slice(1), {
           stdio: ["ignore", "pipe", "pipe"],
           env: scrubbedEnv(),

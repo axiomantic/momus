@@ -35,7 +35,12 @@ docs = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not adversarial'"
+# -ra prints the short summary for every non-passing outcome, skips
+# included. Without it a skipped test is one "s" in the progress line and
+# a green exit, so an opt-in integration test that never runs looks exactly
+# like one that ran. It lives here rather than in the CI invocation so the
+# same reason text shows up locally and in every workflow that calls pytest.
+addopts = "-m 'not adversarial' -ra"
 markers = [
   "unit: fast unit tests (default)",
   "integration: spawns pi or other subprocesses; slower; opt-in",

@@ -7,7 +7,10 @@ on the momus codebase.
 
 - Python: `uv sync` then `uv run pytest tests/`. Default config skips
   the adversarial corpus.
-- TypeScript extensions: `bun test momus/extensions/readonly-tools.test.ts`.
+- TypeScript extensions: `npx --no-install tsc --noEmit` then
+  `bun test momus/extensions/readonly-tools.test.ts`. Bun strips types
+  rather than checking them, so the suite alone is green on code tsc
+  rejects; CI runs both in the `typescript-tests` job.
 - Pi runtime: pinned to `@mariozechner/pi-coding-agent@0.72.1` via
   `package-lock.json`. Install with `npm ci`, not `npm install`. The
   pin is enforced by the unit checks in

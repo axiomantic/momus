@@ -15,7 +15,9 @@ npm ci
 `uv sync --group dev` installs the runtime dependencies plus the dev
 group (`pytest`, `pytest-tripwire`, `ruff`, `mypy`, `pre-commit`).
 `npm ci` installs the pinned pi runtime
-(`@mariozechner/pi-coding-agent@0.72.1`) from `package-lock.json`.
+(`@mariozechner/pi-coding-agent@0.72.1`) from `package-lock.json`,
+plus the `typescript` and `@types/bun` devDependencies the TypeScript
+type check needs.
 Use `npm ci`, not `npm install`: the pin is intentional and the unit
 checks in `tests/integration/test_pi_tool_enforcement.py` will fail if
 it drifts.
@@ -33,7 +35,7 @@ uv run pytest -m 'not adversarial'
 ```
 
 The pytest default already excludes the adversarial mark
-(`addopts = -m 'not adversarial'` in `pyproject.toml`), so the bare
+(`addopts = -m 'not adversarial' -ra` in `pyproject.toml`), so the bare
 `uv run pytest` form does the same thing as the explicit
 `-m 'not adversarial'`. Keeping the mark in the command makes it
 obvious you are running the fast suite.
@@ -62,18 +64,29 @@ Targeted test runs are usually what you want. Match scope to change.
 Test marks are declared in `pyproject.toml` under
 `[tool.pytest.ini_options].markers`.
 
+`-ra` in the same `addopts` prints a short summary line for every
+non-passing outcome. A skipped test is otherwise a single `s` in the
+progress line and a zero exit, which reads identically to a test that
+ran. The integration test above skips whenever `LLM_API_KEY` is unset,
+including on every CI run, so the reason is now printed rather than
+inferred.
+
 ## TypeScript extension tests
 
 The pi extension (`momus/extensions/readonly-tools.ts`) has its own
 test file. Run it with bun:
 
 ```
+npx --no-install tsc --noEmit
 bun test momus/extensions/readonly-tools.test.ts
 ```
 
-This is the test for cwd containment, realpath checks, and the
-`bash_ro` argv allowlist. If you change `readonly-tools.ts`, run this
-before pushing.
+`bun test` covers cwd containment, realpath checks, and the `bash_ro`
+argv allowlist. It does not check types: bun strips them, so the suite
+is green on code `tsc` rejects. That is what the `tsc --noEmit` line is
+for, and CI runs both. Settings live in `tsconfig.json` (`strict`, and
+only `momus/extensions/**/*.ts` in scope). If you change
+`readonly-tools.ts`, run both before pushing.
 
 ## Pre-commit
 
