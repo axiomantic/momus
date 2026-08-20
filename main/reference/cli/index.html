@@ -1506,6 +1506,8 @@
 <li><code>GITHUB_RUN_URL</code>: linked into status comments and the review footer. Auto-composed from <code>GITHUB_SERVER_URL</code> / <code>GITHUB_REPOSITORY</code> / <code>GITHUB_RUN_ID</code> when unset.</li>
 <li><code>MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2</code>: comma-separated env-var allowlist passed through to pi. Default-deny otherwise. Names must match <code>^[A-Z][A-Z0-9_]*$</code>. See <code>momus/invoke_pi.py</code> and the README opt-in escape hatch warning.</li>
 <li><code>MOMUS_TOOLCALL_LOG</code>: when set, the readonly-tools extension emits one JSON record per tool invocation. Used by the adversarial corpus harness. Available since 1.1.0.</li>
+<li><code>MOMUS_PI_MAX_TOKENS</code>: per-message output token cap for the <code>byo</code> provider. Defaults to the cap pi-ai's bundled model registry records for <code>LLM_MODEL</code>, or <code>32768</code> for a model the registry does not know. Set this only to hold the cap <em>down</em>. The budget covers reasoning tokens as well as visible output, so a cap sized only for the answer starves the <code>write_output</code> tool call and the phase ends with <code>stopReason=length</code> having written nothing. Must be a positive integer; an unparseable value fails at extension load rather than falling back to the default.</li>
+<li><code>MOMUS_LOG_SNIPPET_CHARS</code>: width of the per-event summaries momus writes to stderr. Default <code>300</code>. Raise it when reproducing a phase failure whose cause is inside a clipped reasoning block.</li>
 </ul>
 <p><code>MOMUS_WORK_DIR</code>, <code>MOMUS_PI_ENV_PASSTHROUGH</code>, and <code>MOMUS_TOOLCALL_LOG</code> are reserved and never forwarded to pi via the passthrough mechanism.</p>
 <h3 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
@@ -1518,6 +1520,7 @@
 <ul>
 <li><code>inputs/diff.patch</code>, <code>inputs/pr-meta.json</code>, <code>inputs/conventions.md</code>, <code>inputs/prior-threads.json</code>, <code>inputs/prior-findings.json</code>.</li>
 <li><code>outputs/findings.json</code> (final, schema-validated), <code>outputs/preflight-log.json</code>, <code>outputs/audit-log.json</code> (when phase 3 runs).</li>
+<li><code>outputs/&lt;phase&gt;-attempt&lt;N&gt;-last-message.txt</code>: written only when a phase ends without its expected output. Carries that attempt's final assistant message in full, with its stop reason, turn count, and <code>write_output</code> call count. It is uploaded with the rest of <code>outputs/</code> even though the run failed, so analysis the model completed before it died is recoverable without mining the stderr log, whose per-event summaries are clipped to <code>MOMUS_LOG_SNIPPET_CHARS</code>.</li>
 </ul>
 <p>The action uploads <code>inputs/</code> and <code>outputs/</code> as a workflow artifact (<code>momus-&lt;pr&gt;-&lt;run_id&gt;</code>, 7-day retention).</p>
 <h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>

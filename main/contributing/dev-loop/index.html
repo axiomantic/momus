@@ -1446,7 +1446,9 @@ small and the commands are exactly the ones CI runs; no ceremony.</p>
 <p><code>uv sync --group dev</code> installs the runtime dependencies plus the dev
 group (<code>pytest</code>, <code>pytest-tripwire</code>, <code>ruff</code>, <code>mypy</code>, <code>pre-commit</code>).
 <code>npm ci</code> installs the pinned pi runtime
-(<code>@mariozechner/pi-coding-agent@0.72.1</code>) from <code>package-lock.json</code>.
+(<code>@mariozechner/pi-coding-agent@0.72.1</code>) from <code>package-lock.json</code>,
+plus the <code>typescript</code> and <code>@types/bun</code> devDependencies the TypeScript
+type check needs.
 Use <code>npm ci</code>, not <code>npm install</code>: the pin is intentional and the unit
 checks in <code>tests/integration/test_pi_tool_enforcement.py</code> will fail if
 it drifts.</p>
@@ -1459,7 +1461,7 @@ runs them in this order; mirror it locally before opening a PR.</p>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>uv run pytest -m &#39;not adversarial&#39;
 </code></pre></div>
 <p>The pytest default already excludes the adversarial mark
-(<code>addopts = -m 'not adversarial'</code> in <code>pyproject.toml</code>), so the bare
+(<code>addopts = -m 'not adversarial' -ra</code> in <code>pyproject.toml</code>), so the bare
 <code>uv run pytest</code> form does the same thing as the explicit
 <code>-m 'not adversarial'</code>. Keeping the mark in the command makes it
 obvious you are running the fast suite.</p>
@@ -1482,14 +1484,24 @@ obvious you are running the fast suite.</p>
 </ul>
 <p>Test marks are declared in <code>pyproject.toml</code> under
 <code>[tool.pytest.ini_options].markers</code>.</p>
+<p><code>-ra</code> in the same <code>addopts</code> prints a short summary line for every
+non-passing outcome. A skipped test is otherwise a single <code>s</code> in the
+progress line and a zero exit, which reads identically to a test that
+ran. The integration test above skips whenever <code>LLM_API_KEY</code> is unset,
+including on every CI run, so the reason is now printed rather than
+inferred.</p>
 <h2 id="typescript-extension-tests">TypeScript extension tests<a class="headerlink" href="#typescript-extension-tests" title="Permanent link">&para;</a></h2>
 <p>The pi extension (<code>momus/extensions/readonly-tools.ts</code>) has its own
 test file. Run it with bun:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>bun test momus/extensions/readonly-tools.test.ts
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>npx --no-install tsc --noEmit
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>bun test momus/extensions/readonly-tools.test.ts
 </code></pre></div>
-<p>This is the test for cwd containment, realpath checks, and the
-<code>bash_ro</code> argv allowlist. If you change <code>readonly-tools.ts</code>, run this
-before pushing.</p>
+<p><code>bun test</code> covers cwd containment, realpath checks, and the <code>bash_ro</code>
+argv allowlist. It does not check types: bun strips them, so the suite
+is green on code <code>tsc</code> rejects. That is what the <code>tsc --noEmit</code> line is
+for, and CI runs both. Settings live in <code>tsconfig.json</code> (<code>strict</code>, and
+only <code>momus/extensions/**/*.ts</code> in scope). If you change
+<code>readonly-tools.ts</code>, run both before pushing.</p>
 <h2 id="pre-commit">Pre-commit<a class="headerlink" href="#pre-commit" title="Permanent link">&para;</a></h2>
 <p><code>pre-commit</code> is a dev dep but not auto-installed. If you want the
 hooks active:</p>
