@@ -59,7 +59,7 @@ The cheapest lever per quality unit. [`provider.model`](../reference/config-sche
 
 ```yaml
 provider:
-  model: deepseek/deepseek-v4-pro
+  model: deepseek/deepseek-v4-flash
 ```
 
 A faster, cheaper model on a low-traffic repo will produce shallower findings but at a fraction of the cost. A flagship model on a high-stakes repo (security-critical, payments, infra) is the opposite trade.
@@ -77,7 +77,7 @@ review:
 verify:
   enabled: true   # keep the safety net
 provider:
-  model: deepseek/deepseek-v4-pro
+  model: deepseek/deepseek-v4-flash
 ```
 
 A maximum-thoroughness profile for a security-critical repo:

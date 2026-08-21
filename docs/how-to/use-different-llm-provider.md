@@ -11,7 +11,8 @@ One key for every major model. Cheapest path to experiment.
 - Get a key: https://openrouter.ai/settings/keys
 - Base URL: `https://openrouter.ai/api/v1`
 - Suggested models:
-  - `deepseek/deepseek-v4-pro` (default; strong code review at low cost)
+  - `deepseek/deepseek-v4-flash` (default; strong code review at low cost)
+  - `deepseek/deepseek-v4-pro`
   - `anthropic/claude-sonnet-4-6`
   - `openai/gpt-4o`
   - `google/gemini-2.0-flash` (cheapest)
@@ -65,11 +66,11 @@ DeepSeek without OpenRouter.
 
 - Get a key: https://platform.deepseek.com/api_keys
 - Base URL: `https://api.deepseek.com/v1`
-- Suggested models: `deepseek-chat`, `deepseek-reasoner`
+- Suggested models: `deepseek-v4-flash`, `deepseek-v4-pro`
 
 ```yaml
 provider:
-  model: deepseek-reasoner
+  model: deepseek-v4-flash
   base_url: https://api.deepseek.com/v1
 ```
 

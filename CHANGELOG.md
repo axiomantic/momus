@@ -6,6 +6,16 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-21
+
+### Changed
+
+- **Default review model switched to `deepseek/deepseek-v4-flash`.**
+  Replaces `deepseek/deepseek-v4-pro` as the default model in the workflow
+  and documentation examples, reducing review input/output token costs by
+  roughly 68% while maintaining reasoning capabilities and limit
+  compatibility.
+
 ## [1.3.0] - 2026-08-20
 
 ### Fixed

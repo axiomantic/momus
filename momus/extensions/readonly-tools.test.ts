@@ -474,11 +474,11 @@ describe("ensureWithinCwd", () => {
 
 describe("lookupModelCost", () => {
   test("returns real pricing for a known OpenRouter model", () => {
-    // deepseek/deepseek-v4-pro is the bot's default model and is in
+    // deepseek/deepseek-v4-flash is the bot's default model and is in
     // pi-ai's bundled MODELS table under the openrouter provider with
     // non-zero per-Mtok cost. If this assertion fails after a pi-ai
     // upgrade, the fix is to re-pin LLM_MODEL or add a fallback price.
-    const cost = lookupModelCost("deepseek/deepseek-v4-pro");
+    const cost = lookupModelCost("deepseek/deepseek-v4-flash");
     expect(cost.input).toBeGreaterThan(0);
     expect(cost.output).toBeGreaterThan(0);
   });
@@ -1266,13 +1266,13 @@ describe("resolveMaxTokens", () => {
 describe("lookupModelLimits", () => {
   // The provider registration hard-coded contextWindow 128000 / maxTokens
   // 8192 for every model. For the model actually in production
-  // (deepseek/deepseek-v4-pro on OpenRouter) pi-ai's own registry records
+  // (deepseek/deepseek-v4-flash on OpenRouter) pi-ai's own registry records
   // 1048576 / 384000, so the hard-coded pair understated the output budget
   // by ~47x and the window by ~8x. The understated window is why pi kept
   // firing `compaction_start reason=threshold`; the understated output
   // budget is why phase 2 ran out of tokens mid-reasoning.
   test("reads the real limits for the production model", () => {
-    const limits = lookupModelLimits("deepseek/deepseek-v4-pro");
+    const limits = lookupModelLimits("deepseek/deepseek-v4-flash");
     expect(limits.contextWindow).toBeGreaterThan(128000);
     expect(limits.maxTokens).toBeGreaterThan(8192);
   });
@@ -1300,7 +1300,7 @@ describe("lookupModelReasoning", () => {
   // would send pi's default level ("medium"), which the map records as
   // unsupported (null). The three fields only make sense together.
   test("carries reasoning, thinkingLevelMap and compat for the production model", () => {
-    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-flash");
     expect(traits.reasoning).toBe(true);
     // The map must be present, and it must be the one that rules out the
     // default level, otherwise the clamp below cannot fire.
@@ -1321,11 +1321,11 @@ describe("lookupModelReasoning", () => {
     // different compat contract. The byo provider registers
     // api: "openai-completions", so copying compat from an entry for another
     // API would be actively wrong rather than merely imprecise.
-    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-flash");
     const matches = [];
     for (const provider of getProviders()) {
       for (const m of getModels(provider)) {
-        if (m.id === "deepseek/deepseek-v4-pro" && m.api === "openai-completions") {
+        if (m.id === "deepseek/deepseek-v4-flash" && m.api === "openai-completions") {
           matches.push(m);
         }
       }
@@ -1349,7 +1349,7 @@ describe("lookupModelReasoning", () => {
     // name, which would silently switch the system message to
     // role: "developer" -- a role DeepSeek does not accept, and a change
     // that has nothing to do with thinking mode. The floor pins it false.
-    const traits = lookupModelReasoning("deepseek/deepseek-v4-pro");
+    const traits = lookupModelReasoning("deepseek/deepseek-v4-flash");
     expect(traits.compat!.supportsDeveloperRole).toBe(false);
   });
 
@@ -1370,7 +1370,7 @@ describe("buildByoModelEntry", () => {
   // hand-copied stand-in. A stand-in would keep passing after the
   // registration drifted away from it.
   test("the registered entry enables reasoning for the production model", () => {
-    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro");
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-flash");
     expect(entry.reasoning).toBe(true);
     expect(entry.compat).toBeDefined();
     expect(entry.thinkingLevelMap).toBeDefined();
@@ -1382,7 +1382,7 @@ describe("buildByoModelEntry", () => {
     // reads model.thinkingLevelMap; without the map it would hand "medium"
     // straight through to the wire, and the registry records "medium" as
     // unsupported for this model.
-    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro");
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-flash");
     const clamped = clampThinkingLevel(entry as any, "medium");
     expect(clamped).not.toBe("medium");
     expect(clamped).toBe("high");
@@ -1396,7 +1396,7 @@ describe("buildByoModelEntry", () => {
   });
 
   test("an explicit maxTokens override still wins over the registry", () => {
-    const entry = buildByoModelEntry("deepseek/deepseek-v4-pro", 16384);
+    const entry = buildByoModelEntry("deepseek/deepseek-v4-flash", 16384);
     expect(entry.maxTokens).toBe(16384);
     // The override must not disturb the other registry-sourced fields.
     expect(entry.reasoning).toBe(true);

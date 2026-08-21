@@ -31,7 +31,7 @@ You need three things:
    matrix, see [How-to: Use a different LLM provider](../how-to/use-different-llm-provider.md#per-repo-override).
 3. **An OpenRouter API key with credit on it.** Five dollars is plenty for
    the tutorial. Reviews typically cost a few cents each on
-   `deepseek/deepseek-v4-pro`. Heavier models cost more.
+   `deepseek/deepseek-v4-flash`. Heavier models cost more.
 
 That is it. You do not need to install anything locally. Momus runs
 entirely inside GitHub Actions.
@@ -72,7 +72,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LLM_BASE_URL: https://openrouter.ai/api/v1
-          LLM_MODEL: deepseek/deepseek-v4-pro
+          LLM_MODEL: deepseek/deepseek-v4-flash
 ```
 
 Commit this to your default branch. Momus only triggers on pull requests

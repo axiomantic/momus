@@ -1,99 +1,140 @@
-# momus
+# Momus
 
-Thorough AI code review as a GitHub Action.
+[![CI](https://github.com/axiomantic/momus/actions/workflows/ci.yml/badge.svg)](https://github.com/axiomantic/momus/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/axiomantic/momus?color=blue)](https://github.com/axiomantic/momus/releases)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Provider-agnostic: works with any OpenAI-compatible LLM (OpenRouter, Anthropic, OpenAI, Bedrock, ...). Highly customizable.
+Thorough, low-noise AI pull-request review as a GitHub Action.
 
-> Momus (/ˈmoʊməs/): The ancient Greek personification of relentless scrutiny. He was ultimately banished from Mount Olympus for his pedantic criticism of trivial defects in the gods' creations rather than assessing their functional intent.
+Momus is designed to catch genuine bugs, regressions, and design issues while filtering out the noise and hallucinations typical of single-shot LLM reviewers. It is provider-agnostic and works with OpenRouter, DeepSeek, Anthropic Claude, OpenAI, Google Gemini, Amazon Bedrock, or any OpenAI-compatible API.
+
+---
+
+## How it works
+
+Momus structures review as a four-phase pipeline:
+
+```
++--------------------------------------------------------------------+
+|  1. Plan (LLM)     Classify prior thread feedback & build plan     |
++--------------------------------------------------------------------+
+                                  |
++--------------------------------------------------------------------+
+|  2. Review (LLM)   Inspect diff & repo using sandboxed tools       |
++--------------------------------------------------------------------+
+                                  |
++--------------------------------------------------------------------+
+|  3. Verify (LLM)   Audit candidate findings; prune false alarms    |
++--------------------------------------------------------------------+
+                                  |
++--------------------------------------------------------------------+
+|  4. Post (Python)  Publish single GitHub Review with inline diffs  |
++--------------------------------------------------------------------+
+```
+
+1. **Plan** (LLM): On re-reviews, Momus reads unresolved review comments, classifies developer responses, and prepares a focused review plan. (Skipped on initial review).
+2. **Review** (LLM): Explores the diff and repository using sandboxed read-only tools (`read_repo`, `grep_repo`, `find_repo`, `ls_repo`, `bash_ro`) to find functional defects, edge cases, and security issues.
+3. **Verify** (LLM): A dedicated verification pass audits every candidate finding from Phase 2 against the codebase. It drops hallucinations, demotes over-inflated severities, and consolidates duplicate items. Phase 3 cannot invent new findings.
+4. **Post** (Python): A deterministic publisher renders verified findings into a single structured GitHub Review (APPROVE, REQUEST_CHANGES, or COMMENT) with inline code comments and PR status checks.
+
+---
 
 ## Quick start
 
-See **[SETUP.md](SETUP.md)** for the full installation walkthrough,
-including the recommended GitHub App configuration that lets the bot post
-real APPROVE reviews (without it, APPROVE downgrades to COMMENT).
+Add `.github/workflows/momus.yml` to your repository:
 
-Status: under construction. Pilot on `elijahr/lockfreequeues`.
+```yaml
+name: Momus Code Review
 
-## Phases
+on:
+  pull_request:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to review"
+        required: true
 
-1. **Plan** — fetch prior bot reviews, classify each prior finding into
-   `PENDING / DECLINED / PARTIAL_AGREEMENT / ALTERNATIVE_PROPOSED /
-   ANSWERED`, produce a checklist for phase 2. Skipped on first review.
-2. **Review** — read the diff, investigate context with `Read` / `Grep` /
-   sandboxed read-only `Bash`, produce structured findings with severity,
-   category, and inline-comment-ready suggestions.
-3. **Verify** — audit phase 2's findings: drop false positives, demote
-   over-severe findings, strip invalid suggestions, consolidate
-   duplicates. Cannot promote or add findings.
-4. **Post** — deterministic Python publisher. Renders findings into a
-   single GitHub Review object (APPROVE / REQUEST_CHANGES / COMMENT)
-   with all inline comments attached. Posts thread replies on prior
-   items, resolves fixed-prior threads via GraphQL.
+permissions:
+  contents: read
+  pull-requests: write
 
-Phases 1, 2, 3 are LLM calls. Phase 4 is pure code.
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-## Harness
+      - uses: axiomantic/momus@v1
+        with:
+          pr_number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+          event: ${{ github.event_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: https://openrouter.ai/api/v1
+          LLM_MODEL: deepseek/deepseek-v4-flash
+```
 
-[pi](https://github.com/badlogic/pi-mono) (`@mariozechner/pi-coding-agent`)
-runs each LLM phase. The pi version is pinned via `package-lock.json`;
-install with `npm ci` rather than `npm install` to honor the pin.
+For complete setup instructions (including GitHub App token configuration so APPROVE reviews post with full approval authority), see [SETUP.md](SETUP.md) and the [Quickstart Tutorial](https://axiomantic.github.io/momus/latest/tutorial/first-review/).
 
-We supply a custom extension (`extensions/readonly-tools.ts`) that
-exposes:
+---
 
-- `bash_ro`: shell with allowlisted binaries (`git`, `cat`, `head`,
-  `tail`, `wc`, `find`, `rg`, `ls`); rejects shell metacharacters and
-  walks `git` argv to keep paths inside the worktree. `gh` is invoked
-  from Python pre-pi (`fetch_priors.py`); the LLM phases never need
-  it, so it was removed from the allowlist in v1.1.0.
-- `write_output`: restricted to writing under `outputs/`, with realpath
-  containment so symlink swaps cannot redirect writes.
-- `read_repo` / `grep_repo` / `find_repo` / `ls_repo`: cwd-contained
-  replacements for pi's built-in read/grep/find/ls. Pi's built-ins are
-  excluded via the `--tools` allowlist so the LLM cannot escape the
-  worktree.
+## Sandboxed tool harness
 
-Built-in `bash`, `write`, `edit` are also excluded via `--tools`.
+Momus executes LLM phases via `@mariozechner/pi-coding-agent` with custom sandboxed tool containment (`momus/extensions/readonly-tools.ts`):
+
+- `read_repo`, `grep_repo`, `find_repo`, `ls_repo`: path-checked, worktree-contained file inspection tools.
+- `bash_ro`: sandboxed shell with allowlisted binaries (`git`, `cat`, `head`, `tail`, `wc`, `find`, `rg`, `ls`). Rejects shell metacharacters and enforces worktree-contained paths.
+- `write_output`: restricted strictly to writing outputs inside `.momus/outputs/` with realpath containment.
+
+Standard unrestricted tools (`write`, `edit`, interactive `bash`) are excluded to prevent prompt-injection escapes.
+
+---
 
 ## Environment scoping
 
-The bot runs pi in a process with a **default-deny env allowlist**:
-only a small set of variables (`HOME`, `PATH`, `TMPDIR`, `LANG`,
-`LC_*`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`,
-`LLM_API_KEY`) is forwarded to the pi child. Anything else on the
-runner environment, including `GITHUB_TOKEN` and `GITHUB_REPOSITORY`,
-is scrubbed before the LLM phases start.
+The bot executes the LLM runtime in a process with a default-deny environment allowlist: only a minimal set of variables (`HOME`, `PATH`, `TMPDIR`, `LANG`, `LC_*`, `NODE_OPTIONS`, `NODE_PATH`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`) is forwarded. All other runner variables, including `GITHUB_TOKEN` and repository secrets, are scrubbed before LLM phases begin.
 
-If your fork or extension needs a custom env var inside pi, set
-`MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2` on the workflow job. Each name
-is added to the allowlist and forwarded as-is. **This is an opt-in
-escape hatch; review what you pass through.** It bypasses the hardening
-that prevents prompt-injected pi runs from reading credentials from
-sibling env vars.
+If your setup requires passing custom environment variables into the runtime, specify `MOMUS_PI_ENV_PASSTHROUGH=NAME1,NAME2` (comma-separated list of names) on the workflow job. This is an explicit opt-in escape hatch; ensure you do not forward sensitive credentials.
+
+---
 
 ## Configuration
 
-`config-defaults.yaml` documents every knob. A target repo overrides any
-of these by committing `.momus.yaml` at its repo root.
+Customize Momus by committing a `.momus.yaml` file to your repository root. Full configuration options are documented in [`momus/config-defaults.yaml`](momus/config-defaults.yaml):
 
-## Provider config (deployment layer)
+```yaml
+review:
+  emit_nits: false               # Omit minor style nits
+  max_findings: 20               # Cap total findings per review
+  emphasis_modules:              # Composable emphasis packs
+    - security
+    - quality_checklist
 
-Set these env vars on the workflow job:
+verify:
+  enabled: true                  # Keep the two-pass verification safety net
 
-- `LLM_API_KEY` — API key for whichever provider
-- `LLM_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
-- `LLM_MODEL` — model slug (e.g. `deepseek/deepseek-v4-pro`)
+provider:
+  model: deepseek/deepseek-v4-flash
+  base_url: https://openrouter.ai/api/v1
+```
 
-The runner translates these into pi's `--provider`, `--model`,
-`--base-url`, `--api-key-env` arguments. The bot itself reads no
-provider-specific env vars.
+---
 
-## Triggers
+## Provider configuration
 
-- `pull_request` opened / reopened: full review on first PR open
-- `workflow_dispatch`: manual re-review (provide `pr_number` input)
+Configure the LLM connection on your GitHub Actions workflow job:
 
-Re-reviews on push are intentionally NOT wired up: each run consumes
-LLM provider quota, and pushing in rapid succession during fix cycles
-will burn that quota fast. To re-review after pushing fixes, dispatch
-the workflow manually.
+- `LLM_API_KEY`: API key secret for your provider.
+- `LLM_BASE_URL`: Endpoint base URL (e.g. `https://openrouter.ai/api/v1` or `https://api.deepseek.com/v1`).
+- `LLM_MODEL`: Model identifier slug (e.g. `deepseek/deepseek-v4-flash`, `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4-6`).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
