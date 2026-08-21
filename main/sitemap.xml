@@ -2,94 +2,94 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://axiomantic.github.io/momus/main/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/contributing/adversarial-corpus/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/contributing/dev-loop/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/contributing/modifying-prompts/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/contributing/release-process/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/explanation/adversarial-corpus/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/explanation/four-phase-pipeline/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/explanation/review-philosophy/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/explanation/threat-model/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/add-convention-files/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/configure-blocking-severities/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/configure-emphasis/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/debug-a-review/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/extend-env-passthrough/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/set-up-github-app/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/tune-cost-vs-thoroughness/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/how-to/use-different-llm-provider/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/reference/action-inputs/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/reference/cli/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/reference/config-schema/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/reference/emphasis-modules/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/reference/prompt-tokens/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
     <url>
          <loc>https://axiomantic.github.io/momus/main/tutorial/first-review/</loc>
-         <lastmod>2026-08-20</lastmod>
+         <lastmod>2026-08-21</lastmod>
     </url>
 </urlset>

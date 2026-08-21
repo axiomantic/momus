@@ -1507,7 +1507,7 @@ for the full surface. Read this for a working setup you can build on.</p>
    matrix, see <a href="../../how-to/use-different-llm-provider/#per-repo-override">How-to: Use a different LLM provider</a>.</li>
 <li><strong>An OpenRouter API key with credit on it.</strong> Five dollars is plenty for
    the tutorial. Reviews typically cost a few cents each on
-   <code>deepseek/deepseek-v4-pro</code>. Heavier models cost more.</li>
+   <code>deepseek/deepseek-v4-flash</code>. Heavier models cost more.</li>
 </ol>
 <p>That is it. You do not need to install anything locally. Momus runs
 entirely inside GitHub Actions.</p>
@@ -1544,7 +1544,7 @@ entirely inside GitHub Actions.</p>
 <a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="w">          </span><span class="nt">GITHUB_TOKEN</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ secrets.GITHUB_TOKEN }}</span>
 <a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="w">          </span><span class="nt">LLM_API_KEY</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ secrets.OPENROUTER_API_KEY }}</span>
 <a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">          </span><span class="nt">LLM_BASE_URL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://openrouter.ai/api/v1</span>
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">          </span><span class="nt">LLM_MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deepseek/deepseek-v4-pro</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">          </span><span class="nt">LLM_MODEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">deepseek/deepseek-v4-flash</span>
 </code></pre></div>
 <p>Commit this to your default branch. Momus only triggers on pull requests
 once the workflow file is on the branch the PR is targeting.</p>
