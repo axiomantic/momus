@@ -26,6 +26,12 @@ inputs:
       together with app_id. See app_id.
     required: false
     default: ""
+  llm_model:
+    description: >-
+      LLM model slug passed to the review agent as LLM_MODEL. A caller that
+      sets LLM_MODEL explicitly on the uses: step overrides this input.
+    required: false
+    default: "z-ai/glm-5.2:free"
 
 runs:
   using: composite
@@ -115,10 +121,17 @@ runs:
         # caller workflow exposes secrets.GITHUB_TOKEN by setting it as env on
         # the `uses:` step that invokes this action. We compose GITHUB_RUN_URL
         # here from the github context so callers do not have to.
-        # LLM_API_KEY / LLM_BASE_URL / LLM_MODEL are also expected to be set as
-        # env on the calling `uses:` step. We never echo these.
+        # LLM_API_KEY / LLM_BASE_URL are expected to be set as env on the
+        # calling `uses:` step. We never echo these. LLM_MODEL now defaults to
+        # the llm_model input; an explicit caller env still wins because the
+        # run script only fills it when unset.
         GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        INPUT_LLM_MODEL: ${{ inputs.llm_model }}
       run: |
+        # Caller-set LLM_MODEL wins; otherwise the llm_model input is the default.
+        if [ -z "${LLM_MODEL:-}" ]; then
+          export LLM_MODEL="$INPUT_LLM_MODEL"
+        fi
         OWNER="${GITHUB_REPOSITORY%%/*}"
         REPO="${GITHUB_REPOSITORY#*/}"
         momus \
