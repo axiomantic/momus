@@ -606,6 +606,21 @@ def test_pi_env_includes_llm_api_key(monkeypatch, tmp_path):
 
 
 @pytest.mark.usefixtures("_scrubbed_env")
+def test_pi_cmd_and_env_default_when_unset(monkeypatch, tmp_path):
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    cmd = invoke_pi_mod._build_pi_command("prompt", ["read_repo"])
+    assert "--model" in cmd
+    model_idx = cmd.index("--model") + 1
+    assert cmd[model_idx] == "z-ai/glm-5.2:free"
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env.get("LLM_BASE_URL") == "https://openrouter.ai/api/v1"
+    assert env.get("LLM_MODEL") == "z-ai/glm-5.2:free"
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
 def test_pi_env_passthrough_passes_listed_keys(monkeypatch, tmp_path):
     monkeypatch.setenv("FOO", "x")
     monkeypatch.setenv("BAR", "y")

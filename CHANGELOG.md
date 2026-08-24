@@ -6,6 +6,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-24
+
+### Changed
+
+- **Unified LLM provider configuration via environment variables.**
+  Removed the `llm_model` action input so LLM provider settings are
+  configured consistently across workflow, job, and org levels via
+  `LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` (or `.momus.yaml`).
+  When unset, Momus automatically falls back to OpenRouter
+  (`https://openrouter.ai/api/v1`) with `z-ai/glm-5.2:free` as the
+  default review model.
+
 ## [1.3.1] - 2026-08-21
 
 ### Changed

@@ -107,6 +107,9 @@ PI_ENV_ALWAYS_ALLOW: frozenset[str] = frozenset(
     }
 )
 
+DEFAULT_LLM_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LLM_MODEL = "z-ai/glm-5.2:free"
+
 # Width of the one-line event summaries written to stderr. The three
 # observed phase-2 crashes were diagnosed only after the fact because the
 # reasoning block that named the cause was clipped here; raise this when
@@ -714,17 +717,8 @@ def _build_pi_command(prompt: str, tools: list[str]) -> list[str]:
     # The pi CLI does NOT accept --base-url. Instead, the readonly-tools
     # extension calls pi.registerProvider("byo", ...) at load time using
     # LLM_BASE_URL / LLM_MODEL / LLM_API_KEY from the environment. We
-    # reference that provider here by name. We still validate that the
-    # env vars are set so the failure is surfaced from Python rather than
-    # later inside pi's tool-call phase.
-    base_url = os.environ.get("LLM_BASE_URL")
-    model = os.environ.get("LLM_MODEL")
-    if not base_url or not model:
-        raise PiInvocationError(
-            "LLM_BASE_URL and LLM_MODEL must be set in the environment "
-            "(read by the readonly-tools extension to register the 'byo' "
-            "provider)."
-        )
+    # reference that provider here by name.
+    model = os.environ.get("LLM_MODEL") or DEFAULT_LLM_MODEL
     cmd += ["--provider", "byo", "--model", model]
     # LLM_API_KEY is forwarded via the environment (see _build_pi_env);
     # pi reads it by name because the extension registers
@@ -782,4 +776,6 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
             out[token] = v
 
     out["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
+    out.setdefault("LLM_BASE_URL", DEFAULT_LLM_BASE_URL)
+    out.setdefault("LLM_MODEL", DEFAULT_LLM_MODEL)
     return out

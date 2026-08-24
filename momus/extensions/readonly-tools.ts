@@ -1270,26 +1270,23 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max) + `\n... [truncated, ${s.length - max} bytes omitted]`;
 }
 
+const DEFAULT_LLM_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_LLM_MODEL = "z-ai/glm-5.2:free";
+
 export default function (pi: ExtensionAPI) {
   // Register a "byo" (bring-your-own) provider pointing at any
   // OpenAI-compatible endpoint (e.g. OpenRouter). pi's CLI does not expose
   // --base-url; instead we register a named provider here and the CLI
   // selects it via --provider byo.
   //
-  // Required env vars (read by THIS extension at load time):
-  //   LLM_BASE_URL  — e.g. https://openrouter.ai/api/v1
-  //   LLM_MODEL     — model id, e.g. deepseek/deepseek-v4-pro
+  // Env vars (read by THIS extension at load time):
+  //   LLM_BASE_URL  — e.g. https://openrouter.ai/api/v1 (defaults to OpenRouter)
+  //   LLM_MODEL     — model id (defaults to z-ai/glm-5.2:free)
   //   LLM_API_KEY   — passed as the env var NAME for pi to read
   //                   (pi resolves the key from process.env at request time;
   //                   the literal value never appears in argv).
-  const baseUrl = process.env.LLM_BASE_URL;
-  const model = process.env.LLM_MODEL;
-  if (!baseUrl || !model) {
-    throw new Error(
-      "readonly-tools extension: LLM_BASE_URL and LLM_MODEL must be set " +
-        "(LLM_API_KEY env var is read by pi at request time).",
-    );
-  }
+  const baseUrl = process.env.LLM_BASE_URL || DEFAULT_LLM_BASE_URL;
+  const model = process.env.LLM_MODEL || DEFAULT_LLM_MODEL;
   if (!process.env.LLM_API_KEY) {
     throw new Error(
       "readonly-tools extension: LLM_API_KEY must be set; pi will read " +

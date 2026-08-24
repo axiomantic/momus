@@ -26,6 +26,9 @@ from .progress import ProgressThrottle, ProgressTracker, estimate_phase_caps
 from .publish import publish
 from .status import post_status
 
+DEFAULT_LLM_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_LLM_MODEL = "z-ai/glm-5.2:free"
+
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
@@ -76,12 +79,17 @@ def _run(
     config = load_config(repo_root)
 
     # Per-repo provider overrides take precedence over the workflow's
-    # LLM_MODEL / LLM_BASE_URL env vars. This lets a repo opt into a
-    # different model or endpoint without changing the org-wide workflow.
+    # LLM_MODEL / LLM_BASE_URL env vars. If neither is set, fall back to
+    # the default OpenRouter provider + glm-5.2:free model.
     if config.provider.model:
         os.environ["LLM_MODEL"] = config.provider.model
+    elif not os.environ.get("LLM_MODEL"):
+        os.environ["LLM_MODEL"] = DEFAULT_LLM_MODEL
+
     if config.provider.base_url:
         os.environ["LLM_BASE_URL"] = config.provider.base_url
+    elif not os.environ.get("LLM_BASE_URL"):
+        os.environ["LLM_BASE_URL"] = DEFAULT_LLM_BASE_URL
 
     pr_meta = _build_pr_meta(args)
 
