@@ -2,7 +2,7 @@
 
 Every key Momus reads from `.momus.yaml`. Defaults live in `momus/config-defaults.yaml`; a target repo overrides any key by committing `.momus.yaml` at its repo root. Anything unset falls back to defaults. Unrecognized keys are an error: typos fail loudly rather than silently dropping intent.
 
-Top-level groups: [`review`](#review), [`conventions`](#conventions), [`post`](#post), [`verify`](#verify), [`checks`](#checks), [`provider`](#provider).
+Top-level groups: [`review`](#review), [`scope`](#scope), [`conventions`](#conventions), [`post`](#post), [`verify`](#verify), [`checks`](#checks), [`provider`](#provider).
 
 ## review {#review}
 
@@ -99,6 +99,80 @@ review:
   repo_emphasis: |
     Treat any panic/unwrap in firmware code as critical.
 ```
+
+## scope {#scope}
+
+Which changed files the review looks at. Where [`review`](#review) governs the findings momus emits, `scope` governs the diff it reads in the first place.
+
+### `scope.exclude_paths` {#scope-exclude-paths}
+
+- Type: `list[str]` (gitignore-syntax patterns)
+- Default: the list below
+- Available since 1.4.0
+
+Files matching any pattern are removed from `inputs/diff.patch` and from `inputs/changed-files.txt`, and the LLM tool layer (`read_repo`, `grep_repo`, `find_repo`, `ls_repo`, `bash_ro`) refuses them.
+
+**Setting this key REPLACES the default list. It does not extend it.** A repo that wants the defaults plus one more entry restates the whole list. This is the ordinary YAML list-override behavior and it is deliberate: an exclusion list you cannot shrink is not an exclusion list you control.
+
+The defaults, verbatim and copy-pasteable:
+
+```yaml
+scope:
+  exclude_paths:
+    - dist/
+    - build/
+    - node_modules/
+    - vendor/
+    - coverage/
+    - "*.min.js"
+    - "*.min.css"
+    - "*.map"
+    - package-lock.json
+    - yarn.lock
+    - pnpm-lock.yaml
+    - uv.lock
+    - poetry.lock
+    - Gemfile.lock
+    - composer.lock
+    - Cargo.lock
+    - go.sum
+```
+
+They cover generated, minified, and vendored output whose content is decided by a source file that IS reviewed. Test snapshots and golden files are deliberately absent: they are often the most informative part of a diff.
+
+Full gitignore semantics apply:
+
+- `!pattern` re-includes a previously excluded path.
+- A leading `/` anchors the pattern to the repo root.
+- A trailing `/` matches directories only.
+- `**` spans directory boundaries.
+- Order matters: the last matching pattern decides.
+- As in gitignore, a file under a directory this list excludes cannot be re-included by a later `!` line. Use `dist/**` rather than `dist/` when you intend to re-include something beneath it.
+
+```yaml
+scope:
+  exclude_paths:
+    - dist/**
+    - "!dist/manifest.json"   # reviewed, even though the rest of dist/ is not
+```
+
+Negated character classes (`[!abc]`, `[^abc]`) are rejected with an error. Momus matches gitignore patterns twice, in Python for the diff and in TypeScript for the tool layer, and the two libraries read that one construct differently. A pattern the two layers disagree about would remove a file from the diff while leaving it readable, so momus refuses it instead. Positive classes and ranges (`*.[oa]`, `file[0-9].txt`) are fine.
+
+Set to `[]` to review everything.
+
+Note: an unrecognized key inside `scope` is currently accepted silently rather than raising, so a typo such as `exclude_path` leaves the defaults in force and reviews everything the defaults do not cover. Check `inputs/changed-files.txt` on the first run after editing this key.
+
+### `scope.exclude_binary_files` {#scope-exclude-binary-files}
+
+- Type: `bool`
+- Default: `false`
+- Available since 1.4.0
+
+Whether to drop binary files from the review diff. Git renders a binary change as a three-line `Binary files ... differ` stanza with no hunk. The model cannot review it, any finding on it would be dropped as off-hunk, and it still counts toward the per-phase cap estimate. Detection is lexical, from the diff momus already captured: a `diff --git` stanza carrying a binary marker and no `@@` header.
+
+Off by default, because a repo that reviews binary assets deliberately should keep seeing that they changed.
+
+Both keys feed the [`<<SCOPE_EXCLUSIONS>>`](./prompt-tokens.md#token-scope-exclusions) prompt token.
 
 ## conventions {#conventions}
 
