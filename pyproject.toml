@@ -9,6 +9,10 @@ description = "Multi-phase AI pull-request review."
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
+    # Gitignore matching for scope.exclude_paths. A runtime dependency,
+    # not a dev one: action.yml pip-installs only [project].dependencies,
+    # so an entry left out here is absent when the action runs.
+    "pathspec>=0.12",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
