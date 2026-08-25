@@ -15,12 +15,15 @@ no mocking layer.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 from momus.config import load_config
 from momus.diff_filter import DiffFilter, unsupported_pattern
+from momus.prep import prep_inputs
+from tripwire import M
 
 CORPUS_PATH = Path(__file__).parent / "fixtures" / "gitignore-corpus.json"
 
@@ -272,3 +275,120 @@ def test_non_list_exclude_paths_fails_loudly(tmp_path: Path):
     (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths: dist/\n")
     with pytest.raises(ValueError, match="must be a list"):
         load_config(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# End to end through prep_inputs
+# ---------------------------------------------------------------------------
+
+_ALLOW_GIT = pytest.mark.allow(M(protocol="subprocess", binary="git"))
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, check=True, cwd=repo
+    ).stdout
+
+
+def _make_repo(repo: Path) -> tuple[str, str]:
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t.t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "commit.gpgsign", "false")
+    # The developer's global gitignore commonly lists `dist/`. Left in
+    # place, `git add` skips the very files this fixture exists to stage
+    # and every exclusion assertion below passes vacuously.
+    _git(repo, "config", "core.excludesFile", "/dev/null")
+    (repo / "seed.txt").write_text("seed\n")
+    _git(repo, "add", "seed.txt")
+    _git(repo, "commit", "-q", "-m", "seed")
+    base_sha = _git(repo, "rev-parse", "HEAD").strip()
+
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("print('hello')\n")
+    (repo / "dist").mkdir()
+    (repo / "dist" / "bundle.js").write_text("var x=1\n")
+    (repo / "dist" / "keep.js").write_text("var keep=1\n")
+    (repo / "vendor.min.js").write_text("var v=1\n")
+    (repo / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x01\x02\x03")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "work")
+    head_sha = _git(repo, "rev-parse", "HEAD").strip()
+    return base_sha, head_sha
+
+
+@_ALLOW_GIT
+def test_prep_inputs_excludes_paths_from_both_diff_and_changed_files(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    base_sha, head_sha = _make_repo(repo)
+    (repo / ".momus.yaml").write_text(
+        "scope:\n  exclude_paths:\n    - dist/**\n    - '!dist/keep.js'\n    - '*.min.js'\n"
+    )
+    work_dir = repo / ".momus"
+
+    inputs_dir = prep_inputs(
+        repo,
+        work_dir,
+        Path(".momus"),
+        {"base_sha": base_sha, "head_sha": head_sha, "run_id": "A"},
+        load_config(repo),
+    )
+
+    patch = (inputs_dir / "diff.patch").read_text()
+    changed = (inputs_dir / "changed-files.txt").read_text().split()
+
+    # Excluded from BOTH artifacts.
+    for excluded in ("dist/bundle.js", "vendor.min.js"):
+        assert excluded not in patch, f"{excluded} leaked into diff.patch"
+        assert excluded not in changed, f"{excluded} leaked into changed-files.txt"
+
+    # Ordinary source survives in both.
+    assert "src/app.py" in patch
+    assert "src/app.py" in changed
+
+    # The `!` re-include survives in both, which is what distinguishes a
+    # real gitignore matcher from a prefix check.
+    assert "dist/keep.js" in patch
+    assert "dist/keep.js" in changed
+
+
+@_ALLOW_GIT
+def test_prep_inputs_excludes_binary_files_when_enabled(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    base_sha, head_sha = _make_repo(repo)
+    (repo / ".momus.yaml").write_text("scope:\n  exclude_paths: []\n  exclude_binary_files: true\n")
+    work_dir = repo / ".momus"
+
+    inputs_dir = prep_inputs(
+        repo,
+        work_dir,
+        Path(".momus"),
+        {"base_sha": base_sha, "head_sha": head_sha, "run_id": "A"},
+        load_config(repo),
+    )
+    patch = (inputs_dir / "diff.patch").read_text()
+    changed = (inputs_dir / "changed-files.txt").read_text().split()
+
+    assert "logo.png" not in patch
+    assert "logo.png" not in changed
+    assert "src/app.py" in changed
+
+
+@_ALLOW_GIT
+def test_prep_inputs_keeps_binary_files_by_default(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    base_sha, head_sha = _make_repo(repo)
+    work_dir = repo / ".momus"
+
+    inputs_dir = prep_inputs(
+        repo,
+        work_dir,
+        Path(".momus"),
+        {"base_sha": base_sha, "head_sha": head_sha, "run_id": "A"},
+        load_config(repo),
+    )
+    changed = (inputs_dir / "changed-files.txt").read_text().split()
+    assert "logo.png" in changed
