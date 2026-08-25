@@ -6,6 +6,18 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-08-25
+
+### Fixed
+
+- **Review diff now uses three-dot (merge-base) semantics.** The review
+  diff and changed-files list were computed with two-dot `base..head`,
+  which for a stacked PR whose base branch has advanced past the branch
+  point reported the base's forward-only commits as reverse-diff
+  deletions, producing false findings. They now use three-dot
+  `base...head`, matching GitHub's PR "Files changed" view and excluding
+  commits that only advanced the base branch.
+
 ## [1.3.3] - 2026-08-24
 
 ### Changed

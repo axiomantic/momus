@@ -56,7 +56,7 @@ def prep_inputs(
 
 def _write_diff(repo_root: Path, base: str, head: str, dest: Path) -> None:
     proc = subprocess.run(
-        ["git", "diff", "--no-color", f"{base}..{head}"],
+        ["git", "diff", "--no-color", f"{base}...{head}"],
         capture_output=True,
         text=True,
         check=True,
@@ -67,7 +67,7 @@ def _write_diff(repo_root: Path, base: str, head: str, dest: Path) -> None:
 
 def _write_changed_files(repo_root: Path, base: str, head: str, dest: Path) -> None:
     proc = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}..{head}"],
+        ["git", "diff", "--name-only", f"{base}...{head}"],
         capture_output=True,
         text=True,
         check=True,
