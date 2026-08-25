@@ -104,6 +104,12 @@ PI_ENV_ALWAYS_ALLOW: frozenset[str] = frozenset(
         # key the extension needs but that is absent from this set does not
         # arrive and the extension silently falls back to its own default.
         "MOMUS_PI_MAX_TOKENS",
+        # Newline-separated gitignore patterns from scope.exclude_paths.
+        # The read tools refuse a matching path. Listed here because the
+        # env is default-deny and the extension would otherwise never see
+        # it; the orchestrator's value is written last (below) and always,
+        # so nothing a caller set on the parent env can survive.
+        "MOMUS_EXCLUDE_PATHS",
     }
 )
 
@@ -129,7 +135,14 @@ _PASSTHROUGH_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 # MOMUS_PI_ENV_PASSTHROUGH they are NOT forwarded (would otherwise let a
 # malicious caller clobber MOMUS_WORK_DIR or redirect the toolcall log).
 _RESERVED_PASSTHROUGH: frozenset[str] = frozenset(
-    {"MOMUS_WORK_DIR", "MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_TOOLCALL_LOG"}
+    {
+        "MOMUS_WORK_DIR",
+        "MOMUS_PI_ENV_PASSTHROUGH",
+        "MOMUS_TOOLCALL_LOG",
+        # Forging this would let a caller shrink the tool layer's
+        # exclusion list back to nothing.
+        "MOMUS_EXCLUDE_PATHS",
+    }
 )
 
 PHASE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
@@ -184,6 +197,7 @@ def invoke_pi_phase(
     repo_root: Path,
     extra_prompt_suffix: str | None = None,
     on_tool_complete: Callable[[], None] | None = None,
+    exclude_paths: list[str] | None = None,
 ) -> list[dict]:
     """
     Run a phase. ``repo_root`` is pi's CWD: the repo checkout, where pi's
@@ -192,6 +206,10 @@ def invoke_pi_phase(
     subdirectory of ``repo_root`` (validated by the orchestrator). Its
     location relative to repo_root is forwarded to the extension via
     ``MOMUS_WORK_DIR`` so write_output knows the allowed outputs prefix.
+
+    ``exclude_paths`` is ``scope.exclude_paths``, forwarded as
+    ``MOMUS_EXCLUDE_PATHS`` so the read tools refuse the same files the
+    diff filter removed.
 
     Returns the list of parsed pi events from the JSON stream. The phase's
     real output is whatever it wrote under ``work_dir/outputs/``.
@@ -206,7 +224,7 @@ def invoke_pi_phase(
     tools = PHASE_TOOL_ALLOWLISTS[phase]
     cmd = _build_pi_command(prompt, tools)
 
-    env = _build_pi_env(work_dir, repo_root)
+    env = _build_pi_env(work_dir, repo_root, exclude_paths)
 
     # Stream pi's output line-by-line so the orchestrator's stderr (and
     # therefore the GitHub Actions log) shows progress in real time. Pi's
@@ -560,6 +578,7 @@ def invoke_pi_phase_with_retry(
     work_dir: Path,
     repo_root: Path,
     on_tool_complete: Callable[[], None] | None = None,
+    exclude_paths: list[str] | None = None,
 ) -> list[dict]:
     """
     Defense-in-depth wrapper around ``invoke_pi_phase``. If the phase exits
@@ -567,7 +586,13 @@ def invoke_pi_phase_with_retry(
     calling ``write_output``), retry once with a hard reminder appended to
     the prompt. Phases not in ``PHASE_EXPECTED_OUTPUTS`` skip the guard.
     """
-    events = invoke_pi_phase(phase, work_dir, repo_root, on_tool_complete=on_tool_complete)
+    events = invoke_pi_phase(
+        phase,
+        work_dir,
+        repo_root,
+        on_tool_complete=on_tool_complete,
+        exclude_paths=exclude_paths,
+    )
     expected_rel = PHASE_EXPECTED_OUTPUTS.get(phase)
     if expected_rel is None:
         return events
@@ -611,6 +636,7 @@ def invoke_pi_phase_with_retry(
         repo_root,
         extra_prompt_suffix=suffix,
         on_tool_complete=on_tool_complete,
+        exclude_paths=exclude_paths,
     )
     # Concatenate both invocations so summarize_usage charges the caller
     # for tokens consumed on the failed first attempt AND the retry.
@@ -726,7 +752,11 @@ def _build_pi_command(prompt: str, tools: list[str]) -> list[str]:
     return cmd
 
 
-def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
+def _build_pi_env(
+    work_dir: Path,
+    repo_root: Path,
+    exclude_paths: list[str] | None = None,
+) -> dict[str, str]:
     """Build the env handed to the pi subprocess (W3: default-deny).
 
     Returns a fresh dict containing only:
@@ -737,9 +767,13 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
        (a) match the conservative shape ``^[A-Z][A-Z0-9_]*$`` and
        (b) are NOT in ``PI_ENV_ALWAYS_ALLOW``, the LC_ glob, or
        ``_RESERVED_PASSTHROUGH``. Skipped keys are logged at INFO (D3).
-    4. ``MOMUS_WORK_DIR`` set to ``work_dir.relative_to(repo_root)``,
-       written LAST so a passthrough listing it cannot clobber the
-       orchestrator's value.
+    4. ``MOMUS_WORK_DIR`` set to ``work_dir.relative_to(repo_root)`` and
+       ``MOMUS_EXCLUDE_PATHS`` set to ``exclude_paths`` joined by
+       newlines, both written LAST and unconditionally so neither a
+       passthrough nor an allowlisted parent value can clobber the
+       orchestrator's. An empty ``exclude_paths`` still writes an empty
+       string, which the extension reads as "exclude nothing"; leaving
+       the key unset instead would let a stale parent value decide.
 
     ``GITHUB_TOKEN``, ``GH_TOKEN``, ``ACTIONS_RUNTIME_TOKEN``, arbitrary
     user secrets, and any key not on the allowlist are absent from the
@@ -776,6 +810,7 @@ def _build_pi_env(work_dir: Path, repo_root: Path) -> dict[str, str]:
             out[token] = v
 
     out["MOMUS_WORK_DIR"] = str(work_dir.relative_to(repo_root))
+    out["MOMUS_EXCLUDE_PATHS"] = "\n".join(exclude_paths or [])
     out.setdefault("LLM_BASE_URL", DEFAULT_LLM_BASE_URL)
     out.setdefault("LLM_MODEL", DEFAULT_LLM_MODEL)
     return out

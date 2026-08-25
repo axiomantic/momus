@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { clampThinkingLevel, getModels, getProviders } from "@mariozechner/pi-ai";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -28,6 +28,9 @@ import {
   executeReadRepo,
   executeWriteOutput,
   buildByoModelEntry,
+  buildExcludeMatcher,
+  findExcludedArgvToken,
+  findUnsupportedPattern,
   isDeepSeekViaOpenRouter,
   lookupModelCost,
   lookupModelLimits,
@@ -1401,5 +1404,170 @@ describe("buildByoModelEntry", () => {
     // The override must not disturb the other registry-sourced fields.
     expect(entry.reasoning).toBe(true);
     expect(entry.contextWindow).toBeGreaterThan(128000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review-scope exclusions
+// ---------------------------------------------------------------------------
+
+const CORPUS = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "..", "..", "tests", "fixtures", "gitignore-corpus.json"),
+    "utf8",
+  ),
+) as {
+  cases: { name: string; patterns: string[]; path: string; excluded: boolean }[];
+  unsupported_patterns: { patterns: string[]; accepted_counterexamples: string[] };
+};
+
+describe("shared gitignore corpus", () => {
+  // The Python suite (tests/test_scope_exclusions.py) asserts pathspec
+  // against this same file. A matcher that drifts fails on both sides.
+  for (const c of CORPUS.cases) {
+    test(`${c.name}: ${JSON.stringify(c.patterns)} vs '${c.path}'`, () => {
+      const matcher = buildExcludeMatcher(c.patterns.join("\n"));
+      const isDirectory = c.path.endsWith("/");
+      const got = matcher === null ? false : matcher.excludes(c.path, isDirectory);
+      expect(got).toBe(c.excluded);
+    });
+  }
+
+  test("the corpus covers both verdicts", () => {
+    expect(CORPUS.cases.length).toBeGreaterThanOrEqual(30);
+    expect(CORPUS.cases.some((c) => c.excluded)).toBe(true);
+    expect(CORPUS.cases.some((c) => !c.excluded)).toBe(true);
+  });
+
+  for (const p of CORPUS.unsupported_patterns.patterns) {
+    test(`rejects unsupported pattern '${p}'`, () => {
+      expect(findUnsupportedPattern([p])).toBe(p);
+      expect(() => buildExcludeMatcher(p)).toThrow(/unsupported pattern/);
+    });
+  }
+
+  for (const p of CORPUS.unsupported_patterns.accepted_counterexamples) {
+    test(`accepts supported pattern '${p}'`, () => {
+      expect(findUnsupportedPattern([p])).toBeNull();
+      expect(buildExcludeMatcher(p)).not.toBeNull();
+    });
+  }
+});
+
+describe("buildExcludeMatcher", () => {
+  test("an unset or empty value builds no matcher", () => {
+    expect(buildExcludeMatcher(undefined)).toBeNull();
+    expect(buildExcludeMatcher("")).toBeNull();
+    expect(buildExcludeMatcher("\n  \n")).toBeNull();
+  });
+
+  test("comments and blank lines are dropped", () => {
+    const m = buildExcludeMatcher("# a comment\n\ndist/\n");
+    expect(m?.patterns).toEqual(["dist/"]);
+  });
+});
+
+describe("tool-layer review-scope containment", () => {
+  const PATTERNS = "dist/\n*.min.js\n";
+
+  function makeScopeCwd(): string {
+    const cwd = makeCwd();
+    mkdirSync(join(cwd, "dist"), { recursive: true });
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(join(cwd, "dist", "bundle.js"), "var secret = 1;\n");
+    writeFileSync(join(cwd, "vendor.min.js"), "var secret = 2;\n");
+    writeFileSync(join(cwd, "src", "app.ts"), "export const secret = 3;\n");
+    return cwd;
+  }
+
+  const matcher = () => buildExcludeMatcher(PATTERNS);
+
+  test("read_repo refuses an excluded file", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeReadRepo({ path: "dist/bundle.js" }, cwd, matcher());
+    expect(res.isError).toBe(true);
+    expect(res.details.error).toBe("ExcludedPath");
+  });
+
+  test("read_repo refuses an excluded file matched by a glob", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeReadRepo({ path: "vendor.min.js" }, cwd, matcher());
+    expect(res.isError).toBe(true);
+    expect(res.details.error).toBe("ExcludedPath");
+  });
+
+  test("read_repo still reads a path in scope (positive control)", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeReadRepo({ path: "src/app.ts" }, cwd, matcher());
+    expect(res.isError).toBeUndefined();
+    expect(res.content[0].text).toContain("secret = 3");
+  });
+
+  test("grep_repo refuses an excluded root", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeGrepRepo({ pattern: "secret", path: "dist" }, cwd, matcher());
+    expect(res.isError).toBe(true);
+    expect(res.details.error).toBe("ExcludedPath");
+  });
+
+  test("grep_repo does not leak excluded content through a repo-wide scan", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeGrepRepo({ pattern: "secret" }, cwd, matcher());
+    const files = res.details.matches.map((m: { file: string }) => m.file);
+    expect(files).toContain("src/app.ts");
+    expect(files.join("\n")).not.toContain("dist/");
+    expect(files).not.toContain("vendor.min.js");
+  });
+
+  test("find_repo refuses an excluded root and omits excluded results", async () => {
+    const cwd = makeScopeCwd();
+    const refused = await executeFindRepo({ path: "dist" }, cwd, matcher());
+    expect(refused.isError).toBe(true);
+    expect(refused.details.error).toBe("ExcludedPath");
+
+    const listed = await executeFindRepo({}, cwd, matcher());
+    expect(listed.details.results).toContain("src/app.ts");
+    expect(listed.details.results).not.toContain("dist");
+    expect(listed.details.results).not.toContain("vendor.min.js");
+  });
+
+  test("ls_repo refuses an excluded directory and omits excluded entries", async () => {
+    const cwd = makeScopeCwd();
+    const refused = await executeLsRepo({ path: "dist" }, cwd, matcher());
+    expect(refused.isError).toBe(true);
+    expect(refused.details.error).toBe("ExcludedPath");
+
+    const listed = await executeLsRepo({}, cwd, matcher());
+    const names = listed.details.entries.map((e: { name: string }) => e.name);
+    expect(names).toContain("src");
+    expect(names).not.toContain("dist");
+    expect(names).not.toContain("vendor.min.js");
+  });
+
+  test("bash_ro argv walk names an excluded path token", () => {
+    const cwd = makeScopeCwd();
+    expect(findExcludedArgvToken(["cat", "dist/bundle.js"], cwd, matcher())).toBe(
+      "dist/bundle.js",
+    );
+    expect(findExcludedArgvToken(["ls", "dist"], cwd, matcher())).toBe("dist");
+    expect(findExcludedArgvToken(["cat", "vendor.min.js"], cwd, matcher())).toBe(
+      "vendor.min.js",
+    );
+    expect(findExcludedArgvToken(["git", "log", "--", "dist/"], cwd, matcher())).toBe(
+      "dist/",
+    );
+  });
+
+  test("bash_ro argv walk passes a path in scope (positive control)", () => {
+    const cwd = makeScopeCwd();
+    expect(findExcludedArgvToken(["cat", "src/app.ts"], cwd, matcher())).toBeNull();
+    expect(findExcludedArgvToken(["git", "log", "-n", "5"], cwd, matcher())).toBeNull();
+  });
+
+  test("no matcher configured leaves every tool unchanged", async () => {
+    const cwd = makeScopeCwd();
+    const res = await executeReadRepo({ path: "dist/bundle.js" }, cwd, null);
+    expect(res.isError).toBeUndefined();
+    expect(findExcludedArgvToken(["cat", "dist/bundle.js"], cwd, null)).toBeNull();
   });
 });

@@ -34,6 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import ignore from "ignore";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getModels, getProviders } from "@mariozechner/pi-ai";
@@ -149,7 +150,8 @@ export type ErrorReason =
   | "DenyListedPath"
   | "NotFound"
   | "InvalidArgument"
-  | "TooLarge";
+  | "TooLarge"
+  | "ExcludedPath";
 
 const DENY_LIST: RegExp[] = [
   /^\/proc\//,
@@ -157,6 +159,148 @@ const DENY_LIST: RegExp[] = [
   /^\/sys\//,
   /^\/dev\//,
 ];
+
+// ---------------------------------------------------------------------------
+// Review-scope exclusions
+// ---------------------------------------------------------------------------
+
+/**
+ * The npm `ignore` package returns the inverse of git's verdict for a
+ * negated character class: for `[!a]bc`, git ignores `xbc` and keeps
+ * `abc`, and `ignore` does the opposite. Python's pathspec matches git.
+ * Momus refuses a pattern its two matchers read differently rather than
+ * let the diff layer and this layer diverge in silence. The same rule
+ * lives in momus/diff_filter.py (`unsupported_pattern`), and
+ * tests/fixtures/gitignore-corpus.json is the shared contract.
+ */
+const NEGATED_CHARACTER_CLASS = /(?<!\\)\[[!^]/;
+
+export function findUnsupportedPattern(patterns: string[]): string | null {
+  for (const p of patterns) {
+    if (NEGATED_CHARACTER_CLASS.test(p)) return p;
+  }
+  return null;
+}
+
+export interface ExcludeMatcher {
+  patterns: string[];
+  excludes(relPath: string, isDirectory: boolean): boolean;
+}
+
+/**
+ * Build the matcher from `MOMUS_EXCLUDE_PATHS` (newline-separated
+ * gitignore patterns, written by momus/invoke_pi.py `_build_pi_env`).
+ *
+ * Returns null when nothing is configured, so a repo running the feature
+ * inert pays no per-path cost. Throws on an unsupported pattern: the
+ * orchestrator rejects the same pattern at config load, so reaching this
+ * throw means the two layers were configured from different sources and
+ * failing at extension load beats reviewing with half a sandbox.
+ */
+export function buildExcludeMatcher(
+  raw: string | undefined,
+): ExcludeMatcher | null {
+  const patterns = (raw ?? "")
+    .split("\n")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && !p.startsWith("#"));
+  if (patterns.length === 0) return null;
+  const bad = findUnsupportedPattern(patterns);
+  if (bad !== null) {
+    throw new Error(
+      `readonly-tools: MOMUS_EXCLUDE_PATHS contains an unsupported pattern ` +
+        `('${bad}'); negated character classes are read differently by the ` +
+        `two gitignore matchers momus uses.`,
+    );
+  }
+  const ig = ignore().add(patterns);
+  return {
+    patterns,
+    excludes(relPath: string, isDirectory: boolean): boolean {
+      if (!relPath || relPath === "." || relPath.startsWith("..")) return false;
+      const normalized = relPath.startsWith("./") ? relPath.slice(2) : relPath;
+      if (normalized.length === 0) return false;
+      const withSlash = normalized.endsWith("/")
+        ? normalized
+        : isDirectory
+          ? `${normalized}/`
+          : normalized;
+      return ig.ignores(withSlash);
+    },
+  };
+}
+
+let cachedExcludeRaw: string | undefined | symbol = Symbol("unset");
+let cachedExcludeMatcher: ExcludeMatcher | null = null;
+
+/**
+ * The matcher for the current process env, rebuilt only when the env
+ * value itself changes. Read lazily rather than at module load so tests
+ * can set the variable after importing this module.
+ */
+export function activeExcludeMatcher(): ExcludeMatcher | null {
+  const raw = process.env.MOMUS_EXCLUDE_PATHS;
+  if (raw !== cachedExcludeRaw) {
+    cachedExcludeRaw = raw;
+    cachedExcludeMatcher = buildExcludeMatcher(raw);
+  }
+  return cachedExcludeMatcher;
+}
+
+function realCwdOf(cwd: string): string {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
+/**
+ * Whether an already-contained absolute path is out of review scope.
+ *
+ * Directory-ness is resolved by stat because gitignore's directory-only
+ * patterns (`dist/`) depend on it; a path that does not exist is treated
+ * as a file, which is the conservative reading for a `cat` of a path the
+ * model guessed at.
+ */
+export function isExcludedPath(
+  resolved: string,
+  cwd: string,
+  matcher: ExcludeMatcher | null,
+): boolean {
+  if (!matcher) return false;
+  const rel = relative(realCwdOf(cwd), resolved);
+  if (!rel || rel === "." || rel.startsWith("..")) return false;
+  let isDirectory = false;
+  try {
+    isDirectory = statSync(resolved).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  return matcher.excludes(rel, isDirectory);
+}
+
+/**
+ * First argv token naming an excluded path, or null.
+ *
+ * Flags are skipped; every other token is treated as a candidate path.
+ * A token that resolves outside cwd is left alone here because
+ * `checkGitArgv` and `rejectAbsoluteArgv` already reject those with a
+ * more specific reason.
+ */
+export function findExcludedArgvToken(
+  argv: string[],
+  cwd: string,
+  matcher: ExcludeMatcher | null,
+): string | null {
+  if (!matcher) return null;
+  for (let i = 1; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.length === 0 || tok.startsWith("-")) continue;
+    if (isExcludedPath(resolve(realCwdOf(cwd), tok), cwd, matcher)) return tok;
+  }
+  return null;
+}
 
 /**
  * Verify a tool input path stays inside the repo cwd.
@@ -473,11 +617,16 @@ export interface ReadRepoParams {
 export async function executeReadRepo(
   params: ReadRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const check = ensureWithinCwd(params.path, cwd);
   if (!check.ok) {
     logToolcall("read_repo", params, null, check.reason);
     return toolError(check.reason, params.path);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("read_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", params.path);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("read_repo", params, null, "NotFound");
@@ -522,6 +671,7 @@ export interface GrepRepoParams {
 export async function executeGrepRepo(
   params: GrepRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   if (typeof params.pattern !== "string" || params.pattern.length === 0) {
     logToolcall("grep_repo", params, null, "InvalidArgument");
@@ -532,6 +682,10 @@ export async function executeGrepRepo(
   if (!check.ok) {
     logToolcall("grep_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("grep_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("grep_repo", params, null, "NotFound");
@@ -569,6 +723,9 @@ export async function executeGrepRepo(
         // Skip symlinks that escape cwd; do not let them tank the whole scan.
         const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
         if (!sub.ok) continue;
+        // An excluded subtree is not searched, so its contents never
+        // reach the model through a match line either.
+        if (isExcludedPath(child, cwd, matcher)) continue;
         visit(child);
         if (matches.length >= MAX_GREP_MATCHES) return;
       }
@@ -625,12 +782,17 @@ export interface FindRepoParams {
 export async function executeFindRepo(
   params: FindRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
   if (!check.ok) {
     logToolcall("find_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("find_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("find_repo", params, null, "NotFound");
@@ -692,6 +854,9 @@ export async function executeFindRepo(
         const child = resolve(abs, e);
         const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
         if (!sub.ok) continue;
+        // An excluded path is neither listed nor descended into, so the
+        // result set never names a file the model may not read.
+        if (isExcludedPath(child, cwd, matcher)) continue;
         visit(child);
         if (out.length >= MAX_FIND_RESULTS) return;
       }
@@ -715,12 +880,17 @@ export interface LsRepoParams {
 export async function executeLsRepo(
   params: LsRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
   if (!check.ok) {
     logToolcall("ls_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("ls_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("ls_repo", params, null, "NotFound");
@@ -741,6 +911,9 @@ export async function executeLsRepo(
   const entries: Array<{ name: string; type: string }> = [];
   for (const n of names) {
     const childAbs = resolve(check.resolved, n);
+    // Excluded entries are omitted rather than listed-but-unreadable:
+    // a listing that names them is a map of what the sandbox hides.
+    if (isExcludedPath(childAbs, cwd, matcher)) continue;
     let cst;
     try {
       cst = statSync(childAbs);
@@ -1535,6 +1708,29 @@ export default function (pi: ExtensionAPI) {
             isError: true,
           };
         }
+      }
+
+      // Review-scope containment. Runs after the per-binary path checks
+      // so an absolute or traversing token still reports its own,
+      // more specific reason.
+      const excludedTok = findExcludedArgvToken(
+        argv,
+        process.cwd(),
+        activeExcludeMatcher(),
+      );
+      if (excludedTok !== null) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                `argv names a path outside the review scope: ${excludedTok}\n`,
+            },
+          ],
+          details: { exitCode: 2, argvReject: "ExcludedPath", offending: excludedTok },
+          isError: true,
+        };
       }
 
       return await new Promise<BashRoResult>((resolveP) => {

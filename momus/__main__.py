@@ -170,6 +170,7 @@ def _run(
             work_dir,
             repo_root,
             on_tool_complete=_on_phase1_tool_complete,
+            exclude_paths=config.scope.exclude_paths,
         )
         phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
@@ -194,6 +195,7 @@ def _run(
         work_dir,
         repo_root,
         on_tool_complete=_on_phase2_tool_complete,
+        exclude_paths=config.scope.exclude_paths,
     )
     phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
@@ -227,6 +229,7 @@ def _run(
             work_dir,
             repo_root,
             on_tool_complete=_on_phase3_tool_complete,
+            exclude_paths=config.scope.exclude_paths,
         )
         phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")
