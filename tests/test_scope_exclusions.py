@@ -23,6 +23,7 @@ import pytest
 from momus.config import load_config
 from momus.diff_filter import DiffFilter, unsupported_pattern
 from momus.prep import prep_inputs
+from momus.render import render_phase_prompt
 from tripwire import M
 
 CORPUS_PATH = Path(__file__).parent / "fixtures" / "gitignore-corpus.json"
@@ -275,6 +276,53 @@ def test_non_list_exclude_paths_fails_loudly(tmp_path: Path):
     (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths: dist/\n")
     with pytest.raises(ValueError, match="must be a list"):
         load_config(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Prompt token
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("phase", ["phase2", "phase3"])
+def test_scope_token_renders_the_instruction_when_active(tmp_path: Path, phase: str):
+    (tmp_path / ".momus.yaml").write_text(
+        "scope:\n  exclude_paths:\n    - generated/\n  exclude_binary_files: true\n"
+    )
+    rendered = render_phase_prompt(phase, load_config(tmp_path), "A", Path(".momus"))
+    assert "## Review scope" in rendered
+    assert "`generated/`" in rendered
+    assert "Binary files are excluded" in rendered
+    assert "<<" not in rendered
+
+
+@pytest.mark.parametrize("phase", ["phase2", "phase3"])
+def test_scope_token_renders_empty_when_inert(tmp_path: Path, phase: str):
+    (tmp_path / ".momus.yaml").write_text(
+        "scope:\n  exclude_paths: []\n  exclude_binary_files: false\n"
+    )
+    rendered = render_phase_prompt(phase, load_config(tmp_path), "A", Path(".momus"))
+    assert "Review scope" not in rendered
+    assert "<<" not in rendered
+
+
+def test_phase1_prompt_has_no_scope_token(tmp_path: Path):
+    """Phase 1 runs with `--tools ["write_output"]`, so it has no file
+    tools to constrain and needs no scope instruction.
+    """
+    rendered = render_phase_prompt("phase1", load_config(tmp_path), "A", Path(".momus"))
+    assert "Review scope" not in rendered
+
+
+def test_scope_instruction_names_patterns_not_matched_paths(tmp_path: Path):
+    """The instruction lists the configured patterns, which are already
+    visible in the repo's own .momus.yaml, and never the paths they
+    matched, which are unbounded and would hand the model a map of the
+    hidden tree.
+    """
+    (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths:\n    - dist/\n")
+    rendered = render_phase_prompt("phase2", load_config(tmp_path), "A", Path(".momus"))
+    assert "`dist/`" in rendered
+    assert "1 configured" in rendered
 
 
 # ---------------------------------------------------------------------------
