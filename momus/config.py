@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml  # type: ignore[import-untyped]  # types-PyYAML stubs not in dev deps
 
+from .diff_filter import unsupported_pattern
+
 DEFAULTS_PATH = Path(__file__).resolve().parent / "config-defaults.yaml"
 ALLOWED_SEVERITIES = {"critical", "high", "medium", "low", "nit"}
 ALLOWED_RUN_ID_SCHEMES = {"alpha", "numeric", "off"}
@@ -66,6 +68,21 @@ class ProviderConfig:
 
 
 @dataclass
+class ScopeConfig:
+    """
+    Which changed files the review looks at.
+
+    ``exclude_paths`` is a list of gitignore-syntax patterns. Setting the
+    key in ``.momus.yaml`` REPLACES the shipped defaults rather than
+    extending them, so a repo that wants the defaults plus one more entry
+    restates the whole list.
+    """
+
+    exclude_paths: list[str]
+    exclude_binary_files: bool
+
+
+@dataclass
 class ChecksConfig:
     """
     Optional Check Run posting alongside the Review object. When enabled,
@@ -87,6 +104,12 @@ class Config:
     verify: VerifyConfig
     checks: ChecksConfig
     provider: ProviderConfig
+    # Default keeps hand-built Config objects (test fixtures, downstream
+    # callers) working and inert: no patterns means nothing is excluded.
+    # load_config always supplies the shipped defaults.
+    scope: ScopeConfig = field(
+        default_factory=lambda: ScopeConfig(exclude_paths=[], exclude_binary_files=False)
+    )
 
 
 def load_config(repo_root: Path) -> Config:
@@ -126,6 +149,7 @@ def _to_config(data: dict[str, Any]) -> Config:
     verify = data.get("verify", {})
     checks = data.get("checks", {})
     provider = data.get("provider", {})
+    scope = data.get("scope", {})
 
     blocking = list(review.get("blocking_severities", []))
     bad = [s for s in blocking if s not in ALLOWED_SEVERITIES]
@@ -152,6 +176,8 @@ def _to_config(data: dict[str, Any]) -> Config:
             f"review.emphasis_modules: unknown module(s) {bad_modules}. "
             f"Allowed: {sorted(ALLOWED_EMPHASIS_MODULES)}"
         )
+
+    exclude_paths = _read_exclude_paths(scope)
 
     policy = post.get("first_review_approve_policy")
     if policy not in ALLOWED_FIRST_REVIEW_POLICIES:
@@ -190,4 +216,27 @@ def _to_config(data: dict[str, Any]) -> Config:
             model=str(provider.get("model", "")),
             base_url=str(provider.get("base_url", "")),
         ),
+        scope=ScopeConfig(
+            exclude_paths=exclude_paths,
+            exclude_binary_files=bool(scope.get("exclude_binary_files", False)),
+        ),
     )
+
+
+def _read_exclude_paths(scope: dict[str, Any]) -> list[str]:
+    raw = scope.get("exclude_paths", [])
+    if raw is None:
+        raw = []
+    if not isinstance(raw, list):
+        raise ValueError(f"scope.exclude_paths: must be a list, got {type(raw).__name__}")
+    patterns = [str(p) for p in raw]
+    rejected = [p for p in patterns if unsupported_pattern(p)]
+    if rejected:
+        raise ValueError(
+            f"scope.exclude_paths: unsupported pattern(s) {rejected}. Negated "
+            "character classes ([!abc], [^abc]) are read differently by the two "
+            "matchers momus uses (Python pathspec for the diff, the npm `ignore` "
+            "package for the tool layer), so a file could leave the diff while "
+            "staying readable. Rewrite the pattern without one."
+        )
+    return patterns

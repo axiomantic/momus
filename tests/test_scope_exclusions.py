@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from momus.config import load_config
 from momus.diff_filter import DiffFilter, unsupported_pattern
 
 CORPUS_PATH = Path(__file__).parent / "fixtures" / "gitignore-corpus.json"
@@ -221,3 +222,53 @@ def test_everything_excluded_yields_an_empty_patch():
     filt = DiffFilter(patterns=("*",))
     patch, _ = filt.filter_patch(_ORDINARY + _EXCLUDED)
     assert patch == ""
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+def test_defaults_apply_when_the_key_is_absent(tmp_path: Path):
+    cfg = load_config(tmp_path)
+    assert "dist/" in cfg.scope.exclude_paths
+    assert "package-lock.json" in cfg.scope.exclude_paths
+    assert cfg.scope.exclude_binary_files is False
+    # Snapshots and golden files stay reviewable.
+    filt = DiffFilter(patterns=tuple(cfg.scope.exclude_paths))
+    assert filt.excludes("tests/__snapshots__/a.snap") is False
+
+
+def test_setting_the_key_replaces_rather_than_merges(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths:\n    - generated/\n")
+    cfg = load_config(tmp_path)
+    assert cfg.scope.exclude_paths == ["generated/"]
+    filt = DiffFilter(patterns=tuple(cfg.scope.exclude_paths))
+    assert filt.excludes("generated/x.py") is True
+    assert filt.excludes("dist/bundle.js") is False
+
+
+def test_empty_list_disables_exclusions_entirely(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths: []\n")
+    cfg = load_config(tmp_path)
+    assert cfg.scope.exclude_paths == []
+
+
+def test_binary_exclusion_is_opt_in(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_binary_files: true\n")
+    cfg = load_config(tmp_path)
+    assert cfg.scope.exclude_binary_files is True
+    # Replacing one key in the group leaves the other at its default.
+    assert "dist/" in cfg.scope.exclude_paths
+
+
+def test_unsupported_pattern_fails_loudly(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text('scope:\n  exclude_paths:\n    - "[!a]bc"\n')
+    with pytest.raises(ValueError, match="unsupported pattern"):
+        load_config(tmp_path)
+
+
+def test_non_list_exclude_paths_fails_loudly(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text("scope:\n  exclude_paths: dist/\n")
+    with pytest.raises(ValueError, match="must be a list"):
+        load_config(tmp_path)
