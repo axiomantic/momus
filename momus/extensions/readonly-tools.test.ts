@@ -1439,6 +1439,18 @@ describe("shared gitignore corpus", () => {
     expect(CORPUS.cases.some((c) => !c.excluded)).toBe(true);
   });
 
+  test("the corpus exercises negated character classes", () => {
+    // A negated class is the construct most likely to be dropped from
+    // the corpus and quietly refused at config load instead, since the
+    // rejection path costs nothing to extend and reads as caution.
+    const negated = CORPUS.cases.filter((c) =>
+      c.patterns.some((p) => /\[[!^]/.test(p)),
+    );
+    expect(negated.length).toBeGreaterThanOrEqual(6);
+    expect(negated.some((c) => c.excluded)).toBe(true);
+    expect(negated.some((c) => !c.excluded)).toBe(true);
+  });
+
   for (const p of CORPUS.unsupported_patterns.patterns) {
     test(`rejects unsupported pattern '${p}'`, () => {
       expect(findUnsupportedPattern([p])).toBe(p);
@@ -1452,6 +1464,39 @@ describe("shared gitignore corpus", () => {
       expect(buildExcludeMatcher(p)).not.toBeNull();
     });
   }
+});
+
+describe("extension module resolution", () => {
+  // pi loads this file from wherever momus was pip installed, which is
+  // never inside the npm tree `npm ci` populates. Node resolves a bare
+  // specifier by walking up from the importing file, so an npm import
+  // here fails at extension load with `Cannot find module` and takes the
+  // `pi.registerProvider("byo", ...)` call down with it. Only node
+  // builtins and the specifiers pi itself supplies to an extension are
+  // resolvable in that layout. `bun test` cannot see this, because it
+  // imports the file from the repo, where node_modules exists.
+  const PI_PROVIDED = new Set([
+    "typebox",
+    "@mariozechner/pi-coding-agent",
+    "@mariozechner/pi-ai",
+  ]);
+
+  test("imports only node builtins and pi-provided modules", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "readonly-tools.ts"),
+      "utf8",
+    );
+    const specifiers = [...source.matchAll(/^\s*import[^;]*?from\s+"([^"]+)";/gm)]
+      .map((m) => m[1])
+      .concat(
+        [...source.matchAll(/\brequire\(\s*"([^"]+)"\s*\)/g)].map((m) => m[1]),
+      );
+    expect(specifiers.length).toBeGreaterThan(0);
+    const foreign = specifiers.filter(
+      (s) => !s.startsWith("node:") && !s.startsWith(".") && !PI_PROVIDED.has(s),
+    );
+    expect(foreign).toEqual([]);
+  });
 });
 
 describe("buildExcludeMatcher", () => {

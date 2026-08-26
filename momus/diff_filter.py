@@ -12,26 +12,17 @@ patch and the changed-files list can never disagree about what is in
 scope.
 
 Gitignore matching is implemented twice in this repo: here with
-``pathspec`` and in ``momus/extensions/readonly-tools.ts`` with the npm
-``ignore`` package. ``tests/fixtures/gitignore-corpus.json`` is the
-shared contract both matchers are asserted against.
+``pathspec`` and in ``momus/extensions/readonly-tools.ts`` with a
+vendored matcher written against the node builtins.
+``tests/fixtures/gitignore-corpus.json`` is the shared contract both
+matchers are asserted against.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 import pathspec
-
-# The npm `ignore` package returns the inverse of git's verdict for a
-# negated character class: for `[!a]bc`, git ignores `xbc` and keeps
-# `abc`, and `ignore` does the opposite. pathspec matches git. Momus
-# cannot enforce a pattern its two matchers read differently, so it
-# refuses the pattern instead of letting the diff layer and the tool
-# layer diverge in silence. The same rule is implemented in
-# readonly-tools.ts (`findUnsupportedPattern`).
-_NEGATED_CHARACTER_CLASS = re.compile(r"(?<!\\)\[[!^]")
 
 # A pattern ending in `/**` needs at least one path segment below the
 # directory, so it never excludes the directory itself. git relies on
@@ -44,8 +35,46 @@ _BINARY_MARKERS = ("Binary files ", "GIT binary patch")
 
 
 def unsupported_pattern(pattern: str) -> bool:
-    """Whether ``pattern`` uses a construct momus refuses to accept."""
-    return _NEGATED_CHARACTER_CLASS.search(pattern) is not None
+    """Whether ``pattern`` uses a construct momus refuses to accept.
+
+    A POSIX bracket expression (``[[:digit:]]``) is the one construct the
+    two matchers read differently. ``pathspec`` passes the class through
+    to Python's ``re``, which reads ``[[:digit:]]`` as the set
+    ``[:digt`` followed by a literal ``]`` and so matches paths such as
+    ``d]ile.txt``; the vendored TypeScript matcher has no equivalent and
+    treats the whole pattern as unmatchable. Neither agrees with git.
+    Momus cannot enforce a pattern its two matchers read differently, so
+    it refuses the pattern rather than let the diff layer and the tool
+    layer diverge in silence. The same scan is implemented in
+    readonly-tools.ts (``findUnsupportedPattern``).
+    """
+    i = 0
+    in_class = False
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if not in_class:
+            if ch == "[":
+                in_class = True
+                i += 1
+                if i < len(pattern) and pattern[i] in "!^":
+                    i += 1
+                # A `]` first in the class is a literal, not the close.
+                if i < len(pattern) and pattern[i] == "]":
+                    i += 1
+                continue
+            i += 1
+            continue
+        if ch == "]":
+            in_class = False
+            i += 1
+            continue
+        if ch == "[" and pattern[i + 1 : i + 2] == ":":
+            return True
+        i += 1
+    return False
 
 
 @dataclass(frozen=True)

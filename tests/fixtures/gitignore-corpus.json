@@ -1,5 +1,5 @@
 {
-  "description": "Shared gitignore-semantics corpus. Read by tests/test_scope_exclusions.py (asserts Python pathspec.GitIgnoreSpec agrees) and by momus/extensions/readonly-tools.test.ts (asserts the npm `ignore` package agrees). Momus matches paths twice, once per language: the Python diff filter decides what the model reviews, the TypeScript tool layer decides what the model can read. A disagreement between the two matchers is invisible at runtime, so every case here must hold in BOTH suites.",
+  "description": "Shared gitignore-semantics corpus. Every verdict here was taken from real `git check-ignore` with `core.excludesFile=/dev/null`. Read by tests/test_scope_exclusions.py (asserts Python pathspec.GitIgnoreSpec agrees) and by momus/extensions/readonly-tools.test.ts (asserts the vendored matcher in readonly-tools.ts agrees). Momus matches paths twice, once per language: the Python diff filter decides what the model reviews, the TypeScript tool layer decides what the model can read. A disagreement between the two matchers is invisible at runtime, so every case here must hold in BOTH suites.",
   "path_convention": "Paths are repo-relative and never start with a slash. A trailing slash marks the path as a directory, which is what makes directory-only patterns (`build/`) discriminate.",
   "cases": [
     {
@@ -463,19 +463,168 @@
       ],
       "path": "a/b/c/d.txt",
       "excluded": true
+    },
+    {
+      "name": "negated character class matches an unlisted character",
+      "patterns": [
+        "[!a]bc"
+      ],
+      "path": "xbc",
+      "excluded": true
+    },
+    {
+      "name": "negated character class rejects a listed character",
+      "patterns": [
+        "[!a]bc"
+      ],
+      "path": "abc",
+      "excluded": false
+    },
+    {
+      "name": "caret spells negation the same way a bang does",
+      "patterns": [
+        "[^a]bc"
+      ],
+      "path": "xbc",
+      "excluded": true
+    },
+    {
+      "name": "caret negation rejects a listed character",
+      "patterns": [
+        "[^a]bc"
+      ],
+      "path": "abc",
+      "excluded": false
+    },
+    {
+      "name": "negated class inside an anchored pattern",
+      "patterns": [
+        "src/[^x]*.py"
+      ],
+      "path": "src/ax.py",
+      "excluded": true
+    },
+    {
+      "name": "negated class inside an anchored pattern rejects its listed character",
+      "patterns": [
+        "src/[^x]*.py"
+      ],
+      "path": "src/xa.py",
+      "excluded": false
+    },
+    {
+      "name": "negated range matches outside the range",
+      "patterns": [
+        "file[!0-9].txt"
+      ],
+      "path": "filea.txt",
+      "excluded": true
+    },
+    {
+      "name": "negated range rejects inside the range",
+      "patterns": [
+        "file[!0-9].txt"
+      ],
+      "path": "file3.txt",
+      "excluded": false
+    },
+    {
+      "name": "negated multi-character range matches outside the range",
+      "patterns": [
+        "[!a-c]bc"
+      ],
+      "path": "dbc",
+      "excluded": true
+    },
+    {
+      "name": "negated multi-character range rejects inside the range",
+      "patterns": [
+        "[!a-c]bc"
+      ],
+      "path": "bbc",
+      "excluded": false
+    },
+    {
+      "name": "a negation carrying a negated class re-includes a file",
+      "patterns": [
+        "logs/**",
+        "!logs/[!k]*.txt"
+      ],
+      "path": "logs/aa.txt",
+      "excluded": false
+    },
+    {
+      "name": "a negation carrying a negated class leaves the excluded character out",
+      "patterns": [
+        "logs/**",
+        "!logs/[!k]*.txt"
+      ],
+      "path": "logs/ka.txt",
+      "excluded": true
+    },
+    {
+      "name": "a closing bracket first in a class is a literal",
+      "patterns": [
+        "[]]x"
+      ],
+      "path": "]x",
+      "excluded": true
+    },
+    {
+      "name": "a closing bracket first in a class matches nothing else",
+      "patterns": [
+        "[]]x"
+      ],
+      "path": "ax",
+      "excluded": false
+    },
+    {
+      "name": "an unterminated bracket makes the pattern match nothing",
+      "patterns": [
+        "a[bc"
+      ],
+      "path": "a[bc",
+      "excluded": false
+    },
+    {
+      "name": "a backslash escapes a bracket",
+      "patterns": [
+        "a\\[b"
+      ],
+      "path": "a[b",
+      "excluded": true
+    },
+    {
+      "name": "a backslash escapes a star",
+      "patterns": [
+        "a\\*b"
+      ],
+      "path": "a*b",
+      "excluded": true
+    },
+    {
+      "name": "an escaped star does not act as a wildcard",
+      "patterns": [
+        "a\\*b"
+      ],
+      "path": "axb",
+      "excluded": false
     }
   ],
   "unsupported_patterns": {
-    "reason": "Momus rejects these patterns at config load. The Python matcher (pathspec) and the TypeScript matcher (the npm `ignore` package) disagree on them, and a disagreement means a file could leave the diff while staying readable, or be blocked from reading while still being reviewed. Verified against git itself: for `[!a]bc`, git ignores `xbc` and keeps `abc`; pathspec agrees with git and `ignore` returns the inverse. Rather than pick a winner silently, momus refuses the pattern and names the reason.",
+    "reason": "Momus rejects these patterns at config load. A POSIX bracket expression is the one construct the Python matcher (pathspec) and the TypeScript matcher (vendored in readonly-tools.ts) read differently, and a disagreement means a file could leave the diff while staying readable, or be blocked from reading while still being reviewed. Measured: for `[[:digit:]]ile.txt`, git ignores `3ile.txt`; pathspec ignores `d]ile.txt` instead, because Python's `re` reads the class as the set `[:digt` followed by a literal `]`; the vendored matcher matches nothing at all. No reading is git's, so momus refuses the pattern and names the reason. Negated character classes are NOT on this list: both matchers agree with git on those, verified against `git check-ignore` over the fuzz corpus, and the `cases` above assert it.",
     "patterns": [
-      "[!a]bc",
-      "src/[^x]*.py",
-      "!logs/[!k]*.txt"
+      "[[:digit:]]ile.txt",
+      "src/[[:upper:]]*.py",
+      "!logs/[a[:space:]]*.txt"
     ],
     "accepted_counterexamples": [
       "*.[oa]",
       "file[0-9].txt",
-      "*.py[cod]"
+      "*.py[cod]",
+      "[!a]bc",
+      "src/[^x]*.py",
+      "!logs/[!k]*.txt"
     ]
   }
 }

@@ -156,7 +156,9 @@ scope:
     - "!dist/manifest.json"   # reviewed, even though the rest of dist/ is not
 ```
 
-Negated character classes (`[!abc]`, `[^abc]`) are rejected with an error. Momus matches gitignore patterns twice, in Python for the diff and in TypeScript for the tool layer, and the two libraries read that one construct differently. A pattern the two layers disagree about would remove a file from the diff while leaving it readable, so momus refuses it instead. Positive classes and ranges (`*.[oa]`, `file[0-9].txt`) are fine.
+Character classes behave as they do in gitignore, negated forms included: `*.[oa]`, `file[0-9].txt`, `[!a]bc` and `src/[^x]*.py` all give the verdict `git check-ignore` gives.
+
+POSIX bracket expressions (`[[:digit:]]`, `[[:alpha:]]`) are rejected with an error. Momus matches gitignore patterns twice, in Python for the diff and in TypeScript for the tool layer, and that one construct is read differently by each, with neither reading matching git. A pattern the two layers disagree about would remove a file from the diff while leaving it readable, so momus refuses it instead. Write the range out (`[0-9]`, `[a-zA-Z]`).
 
 Set to `[]` to review everything.
 

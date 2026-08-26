@@ -3,10 +3,11 @@
 Three layers are covered here:
 
 * the shared gitignore corpus, which the TypeScript suite asserts against
-  the npm ``ignore`` package and this suite asserts against ``pathspec``;
+  the vendored matcher in ``readonly-tools.ts`` and this suite asserts
+  against ``pathspec``;
 * the patch/changed-files filter, including the stanza shapes a naive
   splitter mishandles (rename, mode-only change, deletion, binary);
-* config loading, where an unsupported pattern must fail loudly.
+* config loading, where a malformed value must fail loudly.
 
 The filter is a data transformation, so these are plain unit tests with
 no mocking layer.
@@ -52,16 +53,6 @@ def test_python_matcher_agrees_with_shared_corpus(case: dict[str, Any]) -> None:
     assert filt.excludes(case["path"]) is case["excluded"]
 
 
-def test_corpus_is_not_empty_and_covers_both_verdicts():
-    """A corpus that drifted to all-true or all-false would pass every
-    matcher, including a matcher that ignores its input entirely.
-    """
-    cases = _corpus_cases()
-    assert len(cases) >= 30
-    verdicts = {c["excluded"] for c in cases}
-    assert verdicts == {True, False}
-
-
 @pytest.mark.parametrize("pattern", _corpus()["unsupported_patterns"]["patterns"])
 def test_corpus_unsupported_patterns_are_rejected(pattern: str) -> None:
     assert unsupported_pattern(pattern) is True
@@ -70,6 +61,16 @@ def test_corpus_unsupported_patterns_are_rejected(pattern: str) -> None:
 @pytest.mark.parametrize("pattern", _corpus()["unsupported_patterns"]["accepted_counterexamples"])
 def test_corpus_accepted_counterexamples_are_not_rejected(pattern: str) -> None:
     assert unsupported_pattern(pattern) is False
+
+
+def test_corpus_is_not_empty_and_covers_both_verdicts():
+    """A corpus that drifted to all-true or all-false would pass every
+    matcher, including a matcher that ignores its input entirely.
+    """
+    cases = _corpus_cases()
+    assert len(cases) >= 30
+    verdicts = {c["excluded"] for c in cases}
+    assert verdicts == {True, False}
 
 
 # ---------------------------------------------------------------------------
@@ -266,8 +267,21 @@ def test_binary_exclusion_is_opt_in(tmp_path: Path):
     assert "dist/" in cfg.scope.exclude_paths
 
 
-def test_unsupported_pattern_fails_loudly(tmp_path: Path):
+def test_negated_character_class_is_accepted(tmp_path: Path):
+    """Both matchers agree with git here, so the pattern is configurable.
+
+    The verdicts asserted below are git's, from ``git check-ignore``:
+    ``[!a]bc`` ignores ``xbc`` and keeps ``abc``.
+    """
     (tmp_path / ".momus.yaml").write_text('scope:\n  exclude_paths:\n    - "[!a]bc"\n')
+    cfg = load_config(tmp_path)
+    assert cfg.scope.exclude_paths == ["[!a]bc"]
+    assert DiffFilter(patterns=("[!a]bc",)).excludes("xbc") is True
+    assert DiffFilter(patterns=("[!a]bc",)).excludes("abc") is False
+
+
+def test_unsupported_pattern_fails_loudly(tmp_path: Path):
+    (tmp_path / ".momus.yaml").write_text('scope:\n  exclude_paths:\n    - "[[:digit:]]ile.txt"\n')
     with pytest.raises(ValueError, match="unsupported pattern"):
         load_config(tmp_path)
 

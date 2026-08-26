@@ -233,10 +233,11 @@ def _read_exclude_paths(scope: dict[str, Any]) -> list[str]:
     rejected = [p for p in patterns if unsupported_pattern(p)]
     if rejected:
         raise ValueError(
-            f"scope.exclude_paths: unsupported pattern(s) {rejected}. Negated "
-            "character classes ([!abc], [^abc]) are read differently by the two "
-            "matchers momus uses (Python pathspec for the diff, the npm `ignore` "
-            "package for the tool layer), so a file could leave the diff while "
-            "staying readable. Rewrite the pattern without one."
+            f"scope.exclude_paths: unsupported pattern(s) {rejected}. A POSIX "
+            "bracket expression ([[:digit:]], [[:alpha:]]) is read differently "
+            "by the two matchers momus uses (Python pathspec for the diff, the "
+            "vendored matcher in readonly-tools.ts for the tool layer), and "
+            "neither reading matches git, so a file could leave the diff while "
+            "staying readable. Write the range out ([0-9], [a-zA-Z]) instead."
         )
     return patterns

@@ -35,9 +35,21 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   `MOMUS_PI_ENV_PASSTHROUGH` cannot forge it.
 - **Shared gitignore corpus** at `tests/fixtures/gitignore-corpus.json`,
   exercised by both `tests/test_scope_exclusions.py` (Python `pathspec`)
-  and `momus/extensions/readonly-tools.test.ts` (npm `ignore`). Momus
-  matches gitignore patterns twice, once per language, and a
-  disagreement between the two would be invisible at runtime.
+  and `momus/extensions/readonly-tools.test.ts` (the vendored matcher).
+  Momus matches gitignore patterns twice, once per language, and a
+  disagreement between the two would be invisible at runtime. Every
+  verdict in the corpus was taken from real `git check-ignore`.
+- **Vendored gitignore matcher** in
+  `momus/extensions/readonly-tools.ts`, written against the node
+  builtins alone. pi loads the extension from the pip-installed copy
+  under `site-packages`, which is never inside the npm tree `npm ci`
+  populates, so any npm import in that file fails at extension load and
+  takes the `byo` provider registration down with it. The matcher
+  implements negation and last-match-wins ordering, leading-slash
+  anchoring, trailing-slash directory-only patterns, `**` spans,
+  bare filenames at any depth, character classes and ranges, escaping,
+  and git's refusal to re-include a file under an excluded parent
+  directory.
 
 ### Changed
 
@@ -49,10 +61,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   off-diff. Previously both cases skipped the check, which would have
   let a fully excluded review publish findings on files momus refused to
   look at.
-- **`pathspec` is now a runtime dependency** in `[project].dependencies`,
-  and **`ignore` is now a declared npm dependency**. Both were present
-  only transitively before and would not have survived the
-  `pip install` / `npm ci --omit=dev` that `action.yml` runs.
+- **`pathspec` is now a runtime dependency** in `[project].dependencies`.
+  It was present only transitively before and would not have survived
+  the `pip install` that `action.yml` runs. The TypeScript half needs no
+  matching npm dependency: it vendors its matcher instead.
 
 ### Security
 
@@ -62,10 +74,13 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   excluded entries while walking; `bash_ro` rejects an argv token naming
   an excluded path. Previously the diff decided what the model should
   review while `read_repo` could open anything under the cwd.
-- Patterns using a negated character class (`[!abc]`, `[^abc]`) are
-  rejected at config load in both languages. The two matchers read that
-  construct differently, and a pattern they disagree about would remove
-  a file from the diff while leaving it readable.
+- Patterns using a POSIX bracket expression (`[[:digit:]]`,
+  `[[:alpha:]]`) are rejected at config load in both languages. The two
+  matchers read that construct differently and neither reading is git's,
+  and a pattern they disagree about would remove a file from the diff
+  while leaving it readable. Negated character classes (`[!abc]`,
+  `[^abc]`) are accepted: both matchers agree with `git check-ignore` on
+  those.
 
 ## [1.3.4] - 2026-08-25
 
