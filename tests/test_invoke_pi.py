@@ -1028,3 +1028,48 @@ def test_log_event_marks_tool_error_reported_on_the_result_object(
     }
     out = _capture_log(event, capsys)
     assert "[momus.pi phase2] tool_error bash_ro: spawn error: spawn rg ENOENT" in out
+
+
+# ---------------------------------------------------------------------------
+# MOMUS_EXCLUDE_PATHS: crossing the Python-to-pi boundary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_exclude_paths_cross_the_boundary_newline_separated(tmp_path):
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path, ["dist/", "!dist/keep.js"])
+    assert env["MOMUS_EXCLUDE_PATHS"] == "dist/\n!dist/keep.js"
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_exclude_paths_key_is_always_written_even_when_empty(tmp_path):
+    """Leaving the key unset would let a stale parent value decide what
+    the tool layer refuses; an empty string reads as 'exclude nothing'.
+    """
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path, [])
+    assert env["MOMUS_EXCLUDE_PATHS"] == ""
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path)
+    assert env["MOMUS_EXCLUDE_PATHS"] == ""
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_exclude_paths_is_on_the_allowlist_and_reserved():
+    """Allowlisted so it survives the default-deny env; reserved so
+    MOMUS_PI_ENV_PASSTHROUGH cannot forge it.
+    """
+    assert "MOMUS_EXCLUDE_PATHS" in invoke_pi_mod.PI_ENV_ALWAYS_ALLOW
+    assert "MOMUS_EXCLUDE_PATHS" in invoke_pi_mod._RESERVED_PASSTHROUGH
+
+
+@pytest.mark.usefixtures("_scrubbed_env")
+def test_parent_env_cannot_forge_exclude_paths(monkeypatch, tmp_path):
+    monkeypatch.setenv("MOMUS_EXCLUDE_PATHS", "")
+    monkeypatch.setenv("MOMUS_PI_ENV_PASSTHROUGH", "MOMUS_EXCLUDE_PATHS")
+    work_dir = tmp_path / "w"
+    work_dir.mkdir()
+    env = invoke_pi_mod._build_pi_env(work_dir, tmp_path, ["dist/"])
+    assert env["MOMUS_EXCLUDE_PATHS"] == "dist/"

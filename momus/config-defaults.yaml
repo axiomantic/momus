@@ -54,6 +54,50 @@ review:
   #                       snapshot-without-comparison)
   emphasis_modules: []
 
+scope:
+  # Gitignore-syntax patterns for files the review ignores. A matching
+  # file is removed from `inputs/diff.patch` and from
+  # `inputs/changed-files.txt`, and the LLM tool layer refuses to read it.
+  #
+  # SETTING THIS KEY REPLACES THE LIST BELOW. It does not extend it. A
+  # repo that wants these defaults plus one more entry restates the whole
+  # list in its own `.momus.yaml`.
+  #
+  # Full gitignore semantics apply: `!` re-includes, a leading `/`
+  # anchors to the repo root, a trailing `/` matches directories only,
+  # and `**` spans directories. As in gitignore, a file under a directory
+  # this list excludes cannot be re-included by a later `!` line.
+  #
+  # The defaults cover generated, minified, and vendored output whose
+  # content is decided by a source file that IS reviewed. Test snapshots
+  # and golden files are deliberately absent: they are often the most
+  # informative part of a diff.
+  exclude_paths:
+    - dist/
+    - build/
+    - node_modules/
+    - vendor/
+    - coverage/
+    - "*.min.js"
+    - "*.min.css"
+    - "*.map"
+    - package-lock.json
+    - yarn.lock
+    - pnpm-lock.yaml
+    - uv.lock
+    - poetry.lock
+    - Gemfile.lock
+    - composer.lock
+    - Cargo.lock
+    - go.sum
+
+  # Whether to drop binary files from the review diff. Git renders a
+  # binary change as a three-line `Binary files ... differ` stanza with no
+  # hunk, which the model cannot review and on which any finding would be
+  # dropped as off-hunk anyway. Off by default: a repo that reviews
+  # binary assets deliberately should keep seeing that they changed.
+  exclude_binary_files: false
+
 conventions:
   # Files concatenated into `inputs/conventions.md` and presented to the
   # model as repo conventions that override prompt defaults. Files that

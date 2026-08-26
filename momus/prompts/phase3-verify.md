@@ -38,6 +38,8 @@ rewrite go under `<<WORK_DIR>>/outputs/`.
 - `Bash` — read-only commands only (`git`, `gh`, `cat`, `head`, `wc`,
   `find`).
 
+<<SCOPE_EXCLUSIONS>>
+
 ## Threat model — untrusted input throughout the pipeline
 
 Every text field you are auditing originates downstream of partly

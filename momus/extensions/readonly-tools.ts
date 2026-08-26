@@ -149,7 +149,8 @@ export type ErrorReason =
   | "DenyListedPath"
   | "NotFound"
   | "InvalidArgument"
-  | "TooLarge";
+  | "TooLarge"
+  | "ExcludedPath";
 
 const DENY_LIST: RegExp[] = [
   /^\/proc\//,
@@ -157,6 +158,433 @@ const DENY_LIST: RegExp[] = [
   /^\/sys\//,
   /^\/dev\//,
 ];
+
+// ---------------------------------------------------------------------------
+// Review-scope exclusions
+// ---------------------------------------------------------------------------
+
+/**
+ * Vendored gitignore matcher.
+ *
+ * This file is loaded by `pi -e <path>` from wherever momus was pip
+ * installed (site-packages), which is never inside the npm tree the
+ * action's `npm ci` populates. Node resolves a bare specifier by walking
+ * up from the importing file, so any npm import here fails at extension
+ * load with `Cannot find module`, and the failure cascades: the
+ * `pi.registerProvider("byo", ...)` call at the bottom of this file never
+ * runs and pi then rejects `--provider byo`. The matcher below is
+ * therefore written against the node builtins only.
+ *
+ * Semantics follow gitignore(5): last matching pattern wins, `!` negates,
+ * a leading `/` anchors to the repo root, a trailing `/` matches
+ * directories only, a `**` path segment spans directory boundaries, and a
+ * bare filename matches at any depth. Directory exclusion is applied by
+ * walking the ancestors of a path first, which is how git refuses to
+ * re-include a file underneath a directory it declined to enter.
+ *
+ * momus/diff_filter.py is the Python half of the same contract and
+ * tests/fixtures/gitignore-corpus.json is the shared oracle both are
+ * asserted against.
+ */
+
+interface GitignoreRule {
+  negated: boolean;
+  dirOnly: boolean;
+  re: RegExp;
+}
+
+/**
+ * First pattern carrying a POSIX bracket expression (`[[:digit:]]`), or
+ * null.
+ *
+ * That construct is the one the two matchers momus uses read differently.
+ * Python's pathspec hands the class to `re`, which reads `[[:digit:]]` as
+ * the set `[:digt` plus a literal `]` and so matches paths like
+ * `d]ile.txt`; the matcher below has no equivalent and would treat the
+ * pattern as unmatchable. Neither reading is git's. The orchestrator
+ * refuses the same pattern at config load (momus/diff_filter.py
+ * `unsupported_pattern`), so reaching the throw in `buildExcludeMatcher`
+ * means the two layers were configured from different sources, and
+ * failing at extension load beats reviewing with half a sandbox.
+ */
+export function findUnsupportedPattern(patterns: string[]): string | null {
+  for (const pattern of patterns) {
+    let i = 0;
+    let inClass = false;
+    while (i < pattern.length) {
+      const ch = pattern[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (!inClass) {
+        if (ch === "[") {
+          inClass = true;
+          i++;
+          if (pattern[i] === "!" || pattern[i] === "^") i++;
+          // A `]` first in the class is a literal, not the close.
+          if (pattern[i] === "]") i++;
+          continue;
+        }
+        i++;
+        continue;
+      }
+      if (ch === "]") {
+        inClass = false;
+        i++;
+        continue;
+      }
+      if (ch === "[" && pattern[i + 1] === ":") return pattern;
+      i++;
+    }
+  }
+  return null;
+}
+
+const REGEX_META = /[.*+?^${}()|[\]\\]/g;
+
+function escapeLiteral(ch: string): string {
+  return ch.replace(REGEX_META, "\\$&");
+}
+
+/** Escape a character for use inside a JS regex character class. */
+function escapeClassChar(ch: string): string {
+  return /[\\\]^[-]/.test(ch) ? `\\${ch}` : ch;
+}
+
+/**
+ * Split on a separator, treating a backslash-escaped separator as literal.
+ */
+function splitUnescaped(text: string, sep: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\\" && i + 1 < text.length) {
+      cur += ch + text[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === sep) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * Translate the bracket expression starting at `start` into a regex class.
+ *
+ * Returns null when the bracket does not open a usable class, which kills
+ * the whole pattern: git's wildmatch aborts on an unterminated bracket, so
+ * such a pattern matches nothing rather than matching a literal `[`.
+ * A POSIX class (`[[:digit:]]`) is refused by `findUnsupportedPattern`
+ * before compilation, so it cannot reach here.
+ */
+function parseCharClass(
+  seg: string,
+  start: number,
+): { regex: string; next: number } | null {
+  let i = start + 1;
+  let negated = false;
+  if (seg[i] === "!" || seg[i] === "^") {
+    negated = true;
+    i++;
+  }
+  let body = "";
+  let first = true;
+  while (i < seg.length) {
+    const ch = seg[i];
+    if (ch === "]" && !first) break;
+    first = false;
+    if (ch === "\\" && i + 1 < seg.length) {
+      body += escapeClassChar(seg[i + 1]);
+      i += 2;
+      continue;
+    }
+    if (ch === "[" && seg[i + 1] === ":") return null;
+    if (ch === "-") {
+      body += "-";
+      i++;
+      continue;
+    }
+    body += escapeClassChar(ch);
+    i++;
+  }
+  if (i >= seg.length || body.length === 0) return null;
+  return { regex: `[${negated ? "^" : ""}${body}]`, next: i + 1 };
+}
+
+/**
+ * Translate one path segment of a pattern into a regex fragment, or null
+ * when the segment carries a bracket expression git would abort on.
+ */
+function segmentToRegex(seg: string): string | null {
+  let out = "";
+  let i = 0;
+  while (i < seg.length) {
+    const ch = seg[i];
+    if (ch === "\\") {
+      if (i + 1 < seg.length) {
+        out += escapeLiteral(seg[i + 1]);
+        i += 2;
+      } else {
+        out += "\\\\";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "*") {
+      // Consecutive asterisks that do not form a whole `**` segment are
+      // ordinary asterisks per gitignore(5).
+      while (i < seg.length && seg[i] === "*") i++;
+      out += "[^/]*";
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      i++;
+      continue;
+    }
+    if (ch === "[") {
+      const cls = parseCharClass(seg, i);
+      if (cls === null) return null;
+      out += cls.regex;
+      i = cls.next;
+      continue;
+    }
+    out += escapeLiteral(ch);
+    i++;
+  }
+  return out;
+}
+
+/** Strip trailing spaces that are not backslash-escaped, as git does. */
+function stripTrailingSpaces(line: string): string {
+  let end = line.length;
+  while (end > 0 && (line[end - 1] === " " || line[end - 1] === "\t")) {
+    let backslashes = 0;
+    let j = end - 2;
+    while (j >= 0 && line[j] === "\\") {
+      backslashes++;
+      j--;
+    }
+    if (backslashes % 2 === 1) break;
+    end--;
+  }
+  return line.slice(0, end);
+}
+
+/**
+ * Compile one gitignore line into a rule.
+ *
+ * Returns null when the line carries no pattern (blank or a comment) and
+ * when the pattern can never match anything, which is the same outcome as
+ * omitting it from the rule list.
+ */
+export function compileGitignorePattern(line: string): GitignoreRule | null {
+  let body = stripTrailingSpaces(line);
+  if (body.length === 0) return null;
+  if (body.startsWith("#")) return null;
+
+  let negated = false;
+  if (body.startsWith("!")) {
+    negated = true;
+    body = body.slice(1);
+  }
+
+  let dirOnly = false;
+  if (body.endsWith("/")) {
+    dirOnly = true;
+    body = body.slice(0, -1);
+  }
+  if (body.length === 0) return null;
+
+  let anchored = body.includes("/");
+  if (body.startsWith("/")) {
+    anchored = true;
+    body = body.slice(1);
+  }
+  if (body.length === 0) return null;
+
+  const segments = splitUnescaped(body, "/").filter((s) => s.length > 0);
+  if (segments.length === 0) return null;
+
+  let source = "";
+  let needSep = false;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const isLast = i === segments.length - 1;
+    if (seg === "**") {
+      if (isLast) {
+        // A trailing `/**` matches everything inside, and so requires at
+        // least one segment below: `dist/**` never excludes `dist` itself.
+        source += `${needSep ? "/" : ""}.+`;
+      } else {
+        // Zero or more intermediate directories, separator included so
+        // that `a/**/b` still matches `a/b`.
+        source += `${needSep ? "/" : ""}(?:[^/]+/)*`;
+        needSep = false;
+      }
+      continue;
+    }
+    const fragment = segmentToRegex(seg);
+    if (fragment === null) return null;
+    source += `${needSep ? "/" : ""}${fragment}`;
+    needSep = true;
+  }
+
+  const prefix = anchored ? "^" : "^(?:.*/)?";
+  return { negated, dirOnly, re: new RegExp(`${prefix}${source}$`) };
+}
+
+export interface ExcludeMatcher {
+  patterns: string[];
+  excludes(relPath: string, isDirectory: boolean): boolean;
+}
+
+function lastMatchWins(
+  rules: GitignoreRule[],
+  path: string,
+  isDirectory: boolean,
+): boolean {
+  let excluded = false;
+  for (const rule of rules) {
+    if (rule.dirOnly && !isDirectory) continue;
+    if (rule.re.test(path)) excluded = !rule.negated;
+  }
+  return excluded;
+}
+
+/**
+ * Build the matcher from `MOMUS_EXCLUDE_PATHS` (newline-separated
+ * gitignore patterns, written by momus/invoke_pi.py `_build_pi_env`).
+ *
+ * Returns null when nothing is configured, so a repo running the feature
+ * inert pays no per-path cost. Throws on a pattern the two matchers read
+ * differently; see `findUnsupportedPattern`.
+ */
+export function buildExcludeMatcher(
+  raw: string | undefined,
+): ExcludeMatcher | null {
+  const patterns = (raw ?? "")
+    .split("\n")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && !p.startsWith("#"));
+  if (patterns.length === 0) return null;
+  const bad = findUnsupportedPattern(patterns);
+  if (bad !== null) {
+    throw new Error(
+      `readonly-tools: MOMUS_EXCLUDE_PATHS contains an unsupported pattern ` +
+        `('${bad}'); POSIX bracket expressions are read differently by the ` +
+        `two gitignore matchers momus uses.`,
+    );
+  }
+  const rules: GitignoreRule[] = [];
+  for (const p of patterns) {
+    const rule = compileGitignorePattern(p);
+    if (rule !== null) rules.push(rule);
+  }
+  return {
+    patterns,
+    excludes(relPath: string, isDirectory: boolean): boolean {
+      if (!relPath || relPath === "." || relPath.startsWith("..")) return false;
+      const normalized = relPath.startsWith("./") ? relPath.slice(2) : relPath;
+      const clean = normalized.replace(/\/+$/, "");
+      if (clean.length === 0) return false;
+      const segments = clean.split("/");
+      // git decides directory by directory whether it may descend, and a
+      // directory it refuses to enter cannot be reopened by a later
+      // negation on something beneath it.
+      for (let i = 1; i < segments.length; i++) {
+        if (lastMatchWins(rules, segments.slice(0, i).join("/"), true)) {
+          return true;
+        }
+      }
+      return lastMatchWins(
+        rules,
+        clean,
+        isDirectory || normalized.endsWith("/"),
+      );
+    },
+  };
+}
+
+let cachedExcludeRaw: string | undefined | symbol = Symbol("unset");
+let cachedExcludeMatcher: ExcludeMatcher | null = null;
+
+/**
+ * The matcher for the current process env, rebuilt only when the env
+ * value itself changes. Read lazily rather than at module load so tests
+ * can set the variable after importing this module.
+ */
+export function activeExcludeMatcher(): ExcludeMatcher | null {
+  const raw = process.env.MOMUS_EXCLUDE_PATHS;
+  if (raw !== cachedExcludeRaw) {
+    cachedExcludeRaw = raw;
+    cachedExcludeMatcher = buildExcludeMatcher(raw);
+  }
+  return cachedExcludeMatcher;
+}
+
+function realCwdOf(cwd: string): string {
+  try {
+    return realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
+/**
+ * Whether an already-contained absolute path is out of review scope.
+ *
+ * Directory-ness is resolved by stat because gitignore's directory-only
+ * patterns (`dist/`) depend on it; a path that does not exist is treated
+ * as a file, which is the conservative reading for a `cat` of a path the
+ * model guessed at.
+ */
+export function isExcludedPath(
+  resolved: string,
+  cwd: string,
+  matcher: ExcludeMatcher | null,
+): boolean {
+  if (!matcher) return false;
+  const rel = relative(realCwdOf(cwd), resolved);
+  if (!rel || rel === "." || rel.startsWith("..")) return false;
+  let isDirectory = false;
+  try {
+    isDirectory = statSync(resolved).isDirectory();
+  } catch {
+    isDirectory = false;
+  }
+  return matcher.excludes(rel, isDirectory);
+}
+
+/**
+ * First argv token naming an excluded path, or null.
+ *
+ * Flags are skipped; every other token is treated as a candidate path.
+ * A token that resolves outside cwd is left alone here because
+ * `checkGitArgv` and `rejectAbsoluteArgv` already reject those with a
+ * more specific reason.
+ */
+export function findExcludedArgvToken(
+  argv: string[],
+  cwd: string,
+  matcher: ExcludeMatcher | null,
+): string | null {
+  if (!matcher) return null;
+  for (let i = 1; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok.length === 0 || tok.startsWith("-")) continue;
+    if (isExcludedPath(resolve(realCwdOf(cwd), tok), cwd, matcher)) return tok;
+  }
+  return null;
+}
 
 /**
  * Verify a tool input path stays inside the repo cwd.
@@ -473,11 +901,16 @@ export interface ReadRepoParams {
 export async function executeReadRepo(
   params: ReadRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const check = ensureWithinCwd(params.path, cwd);
   if (!check.ok) {
     logToolcall("read_repo", params, null, check.reason);
     return toolError(check.reason, params.path);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("read_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", params.path);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("read_repo", params, null, "NotFound");
@@ -522,6 +955,7 @@ export interface GrepRepoParams {
 export async function executeGrepRepo(
   params: GrepRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   if (typeof params.pattern !== "string" || params.pattern.length === 0) {
     logToolcall("grep_repo", params, null, "InvalidArgument");
@@ -532,6 +966,10 @@ export async function executeGrepRepo(
   if (!check.ok) {
     logToolcall("grep_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("grep_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("grep_repo", params, null, "NotFound");
@@ -569,6 +1007,9 @@ export async function executeGrepRepo(
         // Skip symlinks that escape cwd; do not let them tank the whole scan.
         const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
         if (!sub.ok) continue;
+        // An excluded subtree is not searched, so its contents never
+        // reach the model through a match line either.
+        if (isExcludedPath(child, cwd, matcher)) continue;
         visit(child);
         if (matches.length >= MAX_GREP_MATCHES) return;
       }
@@ -625,12 +1066,17 @@ export interface FindRepoParams {
 export async function executeFindRepo(
   params: FindRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
   if (!check.ok) {
     logToolcall("find_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("find_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("find_repo", params, null, "NotFound");
@@ -692,6 +1138,9 @@ export async function executeFindRepo(
         const child = resolve(abs, e);
         const sub = ensureWithinCwd(relative(cwd, child) || ".", cwd);
         if (!sub.ok) continue;
+        // An excluded path is neither listed nor descended into, so the
+        // result set never names a file the model may not read.
+        if (isExcludedPath(child, cwd, matcher)) continue;
         visit(child);
         if (out.length >= MAX_FIND_RESULTS) return;
       }
@@ -715,12 +1164,17 @@ export interface LsRepoParams {
 export async function executeLsRepo(
   params: LsRepoParams,
   cwd: string,
+  matcher: ExcludeMatcher | null = activeExcludeMatcher(),
 ): Promise<any> {
   const root = params.path ?? ".";
   const check = ensureWithinCwd(root, cwd);
   if (!check.ok) {
     logToolcall("ls_repo", params, null, check.reason);
     return toolError(check.reason, root);
+  }
+  if (isExcludedPath(check.resolved, cwd, matcher)) {
+    logToolcall("ls_repo", params, check.resolved, "ExcludedPath");
+    return toolError("ExcludedPath", root);
   }
   if (!existsSync(check.resolved)) {
     logToolcall("ls_repo", params, null, "NotFound");
@@ -741,6 +1195,9 @@ export async function executeLsRepo(
   const entries: Array<{ name: string; type: string }> = [];
   for (const n of names) {
     const childAbs = resolve(check.resolved, n);
+    // Excluded entries are omitted rather than listed-but-unreadable:
+    // a listing that names them is a map of what the sandbox hides.
+    if (isExcludedPath(childAbs, cwd, matcher)) continue;
     let cst;
     try {
       cst = statSync(childAbs);
@@ -1535,6 +1992,29 @@ export default function (pi: ExtensionAPI) {
             isError: true,
           };
         }
+      }
+
+      // Review-scope containment. Runs after the per-binary path checks
+      // so an absolute or traversing token still reports its own,
+      // more specific reason.
+      const excludedTok = findExcludedArgvToken(
+        argv,
+        process.cwd(),
+        activeExcludeMatcher(),
+      );
+      if (excludedTok !== null) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `exit=2\n--- stdout ---\n\n--- stderr ---\n` +
+                `argv names a path outside the review scope: ${excludedTok}\n`,
+            },
+          ],
+          details: { exitCode: 2, argvReject: "ExcludedPath", offending: excludedTok },
+          isError: true,
+        };
       }
 
       return await new Promise<BashRoResult>((resolveP) => {

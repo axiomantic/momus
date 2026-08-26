@@ -6,6 +6,82 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-25
+
+### Added
+
+- **Review-scope exclusions (`scope.exclude_paths`).** A list of
+  gitignore-syntax patterns naming files the review ignores. Matching
+  files are removed from `inputs/diff.patch` and
+  `inputs/changed-files.txt`, are named as out of scope in the phase 2
+  and phase 3 prompts, and are refused by the `read_repo`, `grep_repo`,
+  `find_repo`, `ls_repo` and `bash_ro` tools. Full gitignore semantics:
+  negation, anchoring, directory-only patterns, and `**` spans. Ships
+  with a default list covering generated, minified, and vendored output
+  plus common lockfiles; test snapshots and golden files are
+  deliberately not excluded. Setting the key REPLACES the default list
+  rather than extending it. See
+  [`reference/config-schema.md`](docs/reference/config-schema.md).
+- **Binary-file exclusion (`scope.exclude_binary_files`), off by
+  default.** Git renders a binary change as a `Binary files ... differ`
+  stanza with no hunk, which the model cannot review and on which any
+  finding is dropped as off-hunk. Enabling the key drops those stanzas
+  from the review diff.
+- **`<<SCOPE_EXCLUSIONS>>` prompt token** carrying the scope instruction
+  into phase 2 and phase 3. Empty when nothing is excluded. It names the
+  configured patterns, never the paths they matched.
+- **`MOMUS_EXCLUDE_PATHS`** on the pi env allowlist, carrying the
+  pattern list across the Python-to-pi boundary. It is also reserved, so
+  `MOMUS_PI_ENV_PASSTHROUGH` cannot forge it.
+- **Shared gitignore corpus** at `tests/fixtures/gitignore-corpus.json`,
+  exercised by both `tests/test_scope_exclusions.py` (Python `pathspec`)
+  and `momus/extensions/readonly-tools.test.ts` (the vendored matcher).
+  Momus matches gitignore patterns twice, once per language, and a
+  disagreement between the two would be invisible at runtime. Every
+  verdict in the corpus was taken from real `git check-ignore`.
+- **Vendored gitignore matcher** in
+  `momus/extensions/readonly-tools.ts`, written against the node
+  builtins alone. pi loads the extension from the pip-installed copy
+  under `site-packages`, which is never inside the npm tree `npm ci`
+  populates, so any npm import in that file fails at extension load and
+  takes the `byo` provider registration down with it. The matcher
+  implements negation and last-match-wins ordering, leading-slash
+  anchoring, trailing-slash directory-only patterns, `**` spans,
+  bare filenames at any depth, character classes and ranges, escaping,
+  and git's refusal to re-include a file under an excluded parent
+  directory.
+
+### Changed
+
+- **`preflight` now distinguishes an unavailable diff from an empty
+  one.** `hunk_lines=None` means the diff could not be read and skips
+  the off-hunk check, as before. `hunk_lines={}` now means the diff was
+  read and nothing in it is reviewable, which is what an exclusion list
+  covering every changed file produces, and every finding is dropped as
+  off-diff. Previously both cases skipped the check, which would have
+  let a fully excluded review publish findings on files momus refused to
+  look at.
+- **`pathspec` is now a runtime dependency** in `[project].dependencies`.
+  It was present only transitively before and would not have survived
+  the `pip install` that `action.yml` runs. The TypeScript half needs no
+  matching npm dependency: it vendors its matcher instead.
+
+### Security
+
+- The read-only tool layer refuses excluded paths rather than merely
+  omitting them from the diff. `read_repo`, `grep_repo`, `find_repo` and
+  `ls_repo` return `error: ExcludedPath` for an excluded target and skip
+  excluded entries while walking; `bash_ro` rejects an argv token naming
+  an excluded path. Previously the diff decided what the model should
+  review while `read_repo` could open anything under the cwd.
+- Patterns using a POSIX bracket expression (`[[:digit:]]`,
+  `[[:alpha:]]`) are rejected at config load in both languages. The two
+  matchers read that construct differently and neither reading is git's,
+  and a pattern they disagree about would remove a file from the diff
+  while leaving it readable. Negated character classes (`[!abc]`,
+  `[^abc]`) are accepted: both matchers agree with `git check-ignore` on
+  those.
+
 ## [1.3.4] - 2026-08-25
 
 ### Fixed
