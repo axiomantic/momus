@@ -269,6 +269,65 @@ def test_422_app_cannot_approve_retries_as_comment_with_note():
     )
 
 
+def test_422_actions_not_permitted_to_approve_retries_as_comment():
+    """GitHub Actions default GITHUB_TOKEN error:
+    {"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to approve pull requests."]}
+    Must trigger the COMMENT retry with downgrade note.
+    """
+    err = publish_mod._GhApiError(
+        422,
+        'gh: Unprocessable Entity (HTTP 422)\n{"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to approve pull requests."]}',
+    )
+    gh_api = tripwire.mock.object(publish_mod, "_gh_api")
+    gh_api.raises(err).returns({})
+
+    with tripwire:
+        publish_mod._submit_review(
+            owner="elijahr",
+            repo="lockfreequeues",
+            pr_number=25,
+            head_sha="abc",
+            body="b",
+            inline_comments=[],
+            event="APPROVE",
+        )
+
+    from dirty_equals import IsInstance
+
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": "b",
+                "event": "APPROVE",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+        raised=IsInstance(publish_mod._GhApiError),
+    )
+    expected_retry_body = (
+        "_Note: verdict was APPROVE but downgraded to COMMENT because the "
+        "default GITHUB_TOKEN cannot approve PRs (configure a GitHub App; "
+        "see SETUP.md)._\n\nb"
+    )
+    gh_api.assert_call(
+        args=(
+            "POST",
+            _reviews_endpoint(),
+            {
+                "commit_id": "abc",
+                "body": expected_retry_body,
+                "event": "COMMENT",
+                "comments": [],
+            },
+        ),
+        kwargs={},
+    )
+
+
 def test_422_cannot_approve_apps_phrasing_also_retries():
     """Liberal matcher: any 422 mentioning "cannot approve" alongside an
     Apps/installation hint should also trigger the COMMENT retry. Guards

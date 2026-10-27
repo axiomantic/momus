@@ -593,13 +593,16 @@ def _is_app_cannot_approve_error(message: str) -> bool:
     """Detect the 422 GitHub returns when an App installation token (most
     notably the default Actions ``GITHUB_TOKEN``) tries to APPROVE.
 
-    GitHub's wording has historically included phrases like "GitHub Apps
-    cannot approve their own pull request" and "must use one of the events
-    `COMMENT` or `REQUEST_CHANGES`". Match liberally to absorb future
-    rephrasing without needing a release.
+    GitHub's wording has historically included phrases like:
+      - "GitHub Actions is not permitted to approve pull requests."
+      - "GitHub Apps cannot approve their own pull request"
+      - "must use one of the events `COMMENT` or `REQUEST_CHANGES`"
+    Match liberally to absorb future rephrasing without needing a release.
     """
     lower = message.lower()
     if "must use one of the events" in lower:
+        return True
+    if "not permitted to approve" in lower:
         return True
     return "cannot approve" in lower and (
         "github app" in lower or "apps" in lower or "installation" in lower
