@@ -106,12 +106,17 @@ def _run(
 
     # Parse the diff so preflight can drop findings whose line citations
     # are not on a hunk (GitHub rejects such inline comments with 422).
+    # None (diff unreadable) and {} (diff read, nothing reviewable in it)
+    # mean different things to preflight; see its docstring.
     diff_path = inputs_dir / "diff.patch"
+    hunk_lines: dict[str, set[int]] | None
     if diff_path.exists():
         hunk_lines = parse_unified_diff(diff_path.read_text())
+        if not hunk_lines:
+            _log("warning: review diff is empty; every changed file is out of review scope")
     else:
         _log(f"warning: {diff_path} not found; skipping off-hunk preflight check")
-        hunk_lines = {}
+        hunk_lines = None
 
     outputs_dir = work_dir / "outputs"
     outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -126,7 +131,7 @@ def _run(
         phases_to_run.append("phase3")
     caps = estimate_phase_caps(
         n_prior_threads=len(prior_threads),
-        n_touched_files=len(hunk_lines),
+        n_touched_files=len(hunk_lines or {}),
     )
     tracker = ProgressTracker(phases_to_run=phases_to_run, caps=caps)
     throttle = ProgressThrottle(min_seconds=15.0, min_pct_delta=2)
@@ -165,6 +170,7 @@ def _run(
             work_dir,
             repo_root,
             on_tool_complete=_on_phase1_tool_complete,
+            exclude_paths=config.scope.exclude_paths,
         )
         phase_usages.append(("phase1", summarize_usage(events)))
         tracker.finish("phase1")
@@ -189,6 +195,7 @@ def _run(
         work_dir,
         repo_root,
         on_tool_complete=_on_phase2_tool_complete,
+        exclude_paths=config.scope.exclude_paths,
     )
     phase_usages.append(("phase2", summarize_usage(events)))
     tracker.finish("phase2")
@@ -222,6 +229,7 @@ def _run(
             work_dir,
             repo_root,
             on_tool_complete=_on_phase3_tool_complete,
+            exclude_paths=config.scope.exclude_paths,
         )
         phase_usages.append(("phase3", summarize_usage(events)))
         tracker.finish("phase3")

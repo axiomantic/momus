@@ -1,0 +1,630 @@
+{
+  "description": "Shared gitignore-semantics corpus. Every verdict here was taken from real `git check-ignore` with `core.excludesFile=/dev/null`. Read by tests/test_scope_exclusions.py (asserts Python pathspec.GitIgnoreSpec agrees) and by momus/extensions/readonly-tools.test.ts (asserts the vendored matcher in readonly-tools.ts agrees). Momus matches paths twice, once per language: the Python diff filter decides what the model reviews, the TypeScript tool layer decides what the model can read. A disagreement between the two matchers is invisible at runtime, so every case here must hold in BOTH suites.",
+  "path_convention": "Paths are repo-relative and never start with a slash. A trailing slash marks the path as a directory, which is what makes directory-only patterns (`build/`) discriminate.",
+  "cases": [
+    {
+      "name": "bare filename matches at repo root",
+      "patterns": [
+        "foo.txt"
+      ],
+      "path": "foo.txt",
+      "excluded": true
+    },
+    {
+      "name": "bare filename matches at any depth",
+      "patterns": [
+        "foo.txt"
+      ],
+      "path": "a/b/foo.txt",
+      "excluded": true
+    },
+    {
+      "name": "leading slash anchors to repo root",
+      "patterns": [
+        "/foo.txt"
+      ],
+      "path": "foo.txt",
+      "excluded": true
+    },
+    {
+      "name": "leading slash does not match a nested copy",
+      "patterns": [
+        "/foo.txt"
+      ],
+      "path": "a/foo.txt",
+      "excluded": false
+    },
+    {
+      "name": "trailing slash matches the directory itself",
+      "patterns": [
+        "build/"
+      ],
+      "path": "build/",
+      "excluded": true
+    },
+    {
+      "name": "trailing slash matches contents of the directory",
+      "patterns": [
+        "build/"
+      ],
+      "path": "build/x.o",
+      "excluded": true
+    },
+    {
+      "name": "trailing slash does not match a plain file of the same name",
+      "patterns": [
+        "build/"
+      ],
+      "path": "build",
+      "excluded": false
+    },
+    {
+      "name": "trailing slash matches a nested directory of that name",
+      "patterns": [
+        "build/"
+      ],
+      "path": "src/build/x.o",
+      "excluded": true
+    },
+    {
+      "name": "anchored directory pattern does not match a nested directory",
+      "patterns": [
+        "/build/"
+      ],
+      "path": "src/build/x.o",
+      "excluded": false
+    },
+    {
+      "name": "directory pattern without trailing slash still covers contents",
+      "patterns": [
+        "build"
+      ],
+      "path": "build/x.o",
+      "excluded": true
+    },
+    {
+      "name": "star does not cross a slash",
+      "patterns": [
+        "src/*.py"
+      ],
+      "path": "src/x/a.py",
+      "excluded": false
+    },
+    {
+      "name": "star matches within one segment",
+      "patterns": [
+        "src/*.py"
+      ],
+      "path": "src/a.py",
+      "excluded": true
+    },
+    {
+      "name": "double star spans intermediate directories",
+      "patterns": [
+        "docs/**/*.md"
+      ],
+      "path": "docs/a/b/c.md",
+      "excluded": true
+    },
+    {
+      "name": "double star also spans zero directories",
+      "patterns": [
+        "docs/**/*.md"
+      ],
+      "path": "docs/c.md",
+      "excluded": true
+    },
+    {
+      "name": "leading double star matches at any depth",
+      "patterns": [
+        "**/logs"
+      ],
+      "path": "a/b/logs",
+      "excluded": true
+    },
+    {
+      "name": "leading double star matches at the root",
+      "patterns": [
+        "**/logs"
+      ],
+      "path": "logs",
+      "excluded": true
+    },
+    {
+      "name": "interior double star matches zero directories",
+      "patterns": [
+        "a/**/b"
+      ],
+      "path": "a/b",
+      "excluded": true
+    },
+    {
+      "name": "interior double star matches several directories",
+      "patterns": [
+        "a/**/b"
+      ],
+      "path": "a/x/y/b",
+      "excluded": true
+    },
+    {
+      "name": "interior double star stays anchored at its first segment",
+      "patterns": [
+        "a/**/b"
+      ],
+      "path": "x/a/b",
+      "excluded": false
+    },
+    {
+      "name": "a slash in the middle anchors the pattern to the root",
+      "patterns": [
+        "doc/frotz"
+      ],
+      "path": "doc/frotz/a.txt",
+      "excluded": true
+    },
+    {
+      "name": "a mid-pattern slash blocks matching at depth",
+      "patterns": [
+        "doc/frotz"
+      ],
+      "path": "a/doc/frotz/a.txt",
+      "excluded": false
+    },
+    {
+      "name": "negation re-includes a previously excluded file",
+      "patterns": [
+        "*.log",
+        "!important.log"
+      ],
+      "path": "important.log",
+      "excluded": false
+    },
+    {
+      "name": "negation leaves the other matches excluded",
+      "patterns": [
+        "*.log",
+        "!important.log"
+      ],
+      "path": "other.log",
+      "excluded": true
+    },
+    {
+      "name": "negation ordering matters: a later exclude wins",
+      "patterns": [
+        "!important.log",
+        "*.log"
+      ],
+      "path": "important.log",
+      "excluded": true
+    },
+    {
+      "name": "gitignore refuses to re-include under an excluded parent directory",
+      "patterns": [
+        "dist/",
+        "!dist/keep.js"
+      ],
+      "path": "dist/keep.js",
+      "excluded": true
+    },
+    {
+      "name": "re-include works when the parent directory itself was never excluded",
+      "patterns": [
+        "dist/**",
+        "!dist/keep.js"
+      ],
+      "path": "dist/keep.js",
+      "excluded": false
+    },
+    {
+      "name": "re-include of a sibling under the same parent stays excluded",
+      "patterns": [
+        "dist/**",
+        "!dist/keep.js"
+      ],
+      "path": "dist/drop.js",
+      "excluded": true
+    },
+    {
+      "name": "character class matches each listed character",
+      "patterns": [
+        "*.[oa]"
+      ],
+      "path": "x.o",
+      "excluded": true
+    },
+    {
+      "name": "character class matches the second listed character",
+      "patterns": [
+        "*.[oa]"
+      ],
+      "path": "x.a",
+      "excluded": true
+    },
+    {
+      "name": "character class rejects an unlisted character",
+      "patterns": [
+        "*.[oa]"
+      ],
+      "path": "x.b",
+      "excluded": false
+    },
+    {
+      "name": "character range matches a digit",
+      "patterns": [
+        "file[0-9].txt"
+      ],
+      "path": "file3.txt",
+      "excluded": true
+    },
+    {
+      "name": "character range rejects a non-digit",
+      "patterns": [
+        "file[0-9].txt"
+      ],
+      "path": "filex.txt",
+      "excluded": false
+    },
+    {
+      "name": "question mark matches exactly one character",
+      "patterns": [
+        "a?c.txt"
+      ],
+      "path": "abc.txt",
+      "excluded": true
+    },
+    {
+      "name": "question mark does not match zero characters",
+      "patterns": [
+        "a?c.txt"
+      ],
+      "path": "ac.txt",
+      "excluded": false
+    },
+    {
+      "name": "empty pattern list excludes nothing",
+      "patterns": [],
+      "path": "dist/bundle.js",
+      "excluded": false
+    },
+    {
+      "name": "comment lines are not patterns",
+      "patterns": [
+        "# dist/",
+        "src/generated/"
+      ],
+      "path": "dist/bundle.js",
+      "excluded": false
+    },
+    {
+      "name": "the momus default list excludes a bundled artifact",
+      "patterns": [
+        "dist/",
+        "build/",
+        "node_modules/",
+        "vendor/",
+        "coverage/",
+        "*.min.js",
+        "*.min.css",
+        "*.map",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "uv.lock",
+        "poetry.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        "Cargo.lock",
+        "go.sum"
+      ],
+      "path": "web/static/app.min.js",
+      "excluded": true
+    },
+    {
+      "name": "the momus default list excludes a nested lockfile",
+      "patterns": [
+        "dist/",
+        "build/",
+        "node_modules/",
+        "vendor/",
+        "coverage/",
+        "*.min.js",
+        "*.min.css",
+        "*.map",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "uv.lock",
+        "poetry.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        "Cargo.lock",
+        "go.sum"
+      ],
+      "path": "frontend/package-lock.json",
+      "excluded": true
+    },
+    {
+      "name": "the momus default list keeps test snapshots reviewable",
+      "patterns": [
+        "dist/",
+        "build/",
+        "node_modules/",
+        "vendor/",
+        "coverage/",
+        "*.min.js",
+        "*.min.css",
+        "*.map",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "uv.lock",
+        "poetry.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        "Cargo.lock",
+        "go.sum"
+      ],
+      "path": "tests/__snapshots__/render.test.ts.snap",
+      "excluded": false
+    },
+    {
+      "name": "the momus default list keeps ordinary source reviewable",
+      "patterns": [
+        "dist/",
+        "build/",
+        "node_modules/",
+        "vendor/",
+        "coverage/",
+        "*.min.js",
+        "*.min.css",
+        "*.map",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "uv.lock",
+        "poetry.lock",
+        "Gemfile.lock",
+        "composer.lock",
+        "Cargo.lock",
+        "go.sum"
+      ],
+      "path": "src/build_pipeline.py",
+      "excluded": false
+    },
+    {
+      "name": "a trailing double-star pattern does not exclude the directory itself",
+      "patterns": [
+        "dist/**"
+      ],
+      "path": "dist/",
+      "excluded": false
+    },
+    {
+      "name": "a trailing double-star pattern still excludes the contents",
+      "patterns": [
+        "dist/**"
+      ],
+      "path": "dist/bundle.js",
+      "excluded": true
+    },
+    {
+      "name": "allow-list recipe re-includes a directory excluded by a catch-all",
+      "patterns": [
+        "*",
+        "!src",
+        "!src/**"
+      ],
+      "path": "src/main.py",
+      "excluded": false
+    },
+    {
+      "name": "allow-list recipe still excludes everything else",
+      "patterns": [
+        "*",
+        "!src",
+        "!src/**"
+      ],
+      "path": "README.md",
+      "excluded": true
+    },
+    {
+      "name": "re-including a subdirectory under an excluded parent still fails",
+      "patterns": [
+        "build/",
+        "!build/keep",
+        "!build/keep/**"
+      ],
+      "path": "build/keep/a.txt",
+      "excluded": true
+    },
+    {
+      "name": "a sibling under the same excluded parent stays excluded",
+      "patterns": [
+        "build/",
+        "!build/keep",
+        "!build/keep/**"
+      ],
+      "path": "build/other/a.txt",
+      "excluded": true
+    },
+    {
+      "name": "a backslash escapes a leading bang",
+      "patterns": [
+        "\\!foo"
+      ],
+      "path": "!foo",
+      "excluded": true
+    },
+    {
+      "name": "a deep ancestor exclusion blocks a deep re-include",
+      "patterns": [
+        "a/b/",
+        "!a/b/c/d.txt"
+      ],
+      "path": "a/b/c/d.txt",
+      "excluded": true
+    },
+    {
+      "name": "negated character class matches an unlisted character",
+      "patterns": [
+        "[!a]bc"
+      ],
+      "path": "xbc",
+      "excluded": true
+    },
+    {
+      "name": "negated character class rejects a listed character",
+      "patterns": [
+        "[!a]bc"
+      ],
+      "path": "abc",
+      "excluded": false
+    },
+    {
+      "name": "caret spells negation the same way a bang does",
+      "patterns": [
+        "[^a]bc"
+      ],
+      "path": "xbc",
+      "excluded": true
+    },
+    {
+      "name": "caret negation rejects a listed character",
+      "patterns": [
+        "[^a]bc"
+      ],
+      "path": "abc",
+      "excluded": false
+    },
+    {
+      "name": "negated class inside an anchored pattern",
+      "patterns": [
+        "src/[^x]*.py"
+      ],
+      "path": "src/ax.py",
+      "excluded": true
+    },
+    {
+      "name": "negated class inside an anchored pattern rejects its listed character",
+      "patterns": [
+        "src/[^x]*.py"
+      ],
+      "path": "src/xa.py",
+      "excluded": false
+    },
+    {
+      "name": "negated range matches outside the range",
+      "patterns": [
+        "file[!0-9].txt"
+      ],
+      "path": "filea.txt",
+      "excluded": true
+    },
+    {
+      "name": "negated range rejects inside the range",
+      "patterns": [
+        "file[!0-9].txt"
+      ],
+      "path": "file3.txt",
+      "excluded": false
+    },
+    {
+      "name": "negated multi-character range matches outside the range",
+      "patterns": [
+        "[!a-c]bc"
+      ],
+      "path": "dbc",
+      "excluded": true
+    },
+    {
+      "name": "negated multi-character range rejects inside the range",
+      "patterns": [
+        "[!a-c]bc"
+      ],
+      "path": "bbc",
+      "excluded": false
+    },
+    {
+      "name": "a negation carrying a negated class re-includes a file",
+      "patterns": [
+        "logs/**",
+        "!logs/[!k]*.txt"
+      ],
+      "path": "logs/aa.txt",
+      "excluded": false
+    },
+    {
+      "name": "a negation carrying a negated class leaves the excluded character out",
+      "patterns": [
+        "logs/**",
+        "!logs/[!k]*.txt"
+      ],
+      "path": "logs/ka.txt",
+      "excluded": true
+    },
+    {
+      "name": "a closing bracket first in a class is a literal",
+      "patterns": [
+        "[]]x"
+      ],
+      "path": "]x",
+      "excluded": true
+    },
+    {
+      "name": "a closing bracket first in a class matches nothing else",
+      "patterns": [
+        "[]]x"
+      ],
+      "path": "ax",
+      "excluded": false
+    },
+    {
+      "name": "an unterminated bracket makes the pattern match nothing",
+      "patterns": [
+        "a[bc"
+      ],
+      "path": "a[bc",
+      "excluded": false
+    },
+    {
+      "name": "a backslash escapes a bracket",
+      "patterns": [
+        "a\\[b"
+      ],
+      "path": "a[b",
+      "excluded": true
+    },
+    {
+      "name": "a backslash escapes a star",
+      "patterns": [
+        "a\\*b"
+      ],
+      "path": "a*b",
+      "excluded": true
+    },
+    {
+      "name": "an escaped star does not act as a wildcard",
+      "patterns": [
+        "a\\*b"
+      ],
+      "path": "axb",
+      "excluded": false
+    }
+  ],
+  "unsupported_patterns": {
+    "reason": "Momus rejects these patterns at config load. A POSIX bracket expression is the one construct the Python matcher (pathspec) and the TypeScript matcher (vendored in readonly-tools.ts) read differently, and a disagreement means a file could leave the diff while staying readable, or be blocked from reading while still being reviewed. Measured: for `[[:digit:]]ile.txt`, git ignores `3ile.txt`; pathspec ignores `d]ile.txt` instead, because Python's `re` reads the class as the set `[:digt` followed by a literal `]`; the vendored matcher matches nothing at all. No reading is git's, so momus refuses the pattern and names the reason. Negated character classes are NOT on this list: both matchers agree with git on those, verified against `git check-ignore` over the fuzz corpus, and the `cases` above assert it.",
+    "patterns": [
+      "[[:digit:]]ile.txt",
+      "src/[[:upper:]]*.py",
+      "!logs/[a[:space:]]*.txt"
+    ],
+    "accepted_counterexamples": [
+      "*.[oa]",
+      "file[0-9].txt",
+      "*.py[cod]",
+      "[!a]bc",
+      "src/[^x]*.py",
+      "!logs/[!k]*.txt"
+    ]
+  }
+}

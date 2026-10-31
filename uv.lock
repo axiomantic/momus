@@ -1389,9 +1389,10 @@ wheels = [
 
 [[package]]
 name = "momus"
-version = "1.2.1"
+version = "1.4.0"
 source = { editable = "." }
 dependencies = [
+    { name = "pathspec" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
@@ -1413,6 +1414,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pathspec", specifier = ">=0.12" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]

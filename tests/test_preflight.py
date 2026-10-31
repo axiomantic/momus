@@ -105,8 +105,8 @@ def test_finding_in_hunk_line_survives(repo: Path):
     assert actions == []
 
 
-def test_empty_hunk_lines_skips_off_hunk_check_and_uses_file_check(repo: Path):
-    """When hunk_lines is empty (no diff info), the off-hunk check is skipped:
+def test_missing_hunk_lines_skips_off_hunk_check_and_uses_file_check(repo: Path):
+    """When hunk_lines is None (the diff could not be read), the off-hunk check is skipped:
     a finding pointing at a missing file falls through to the file-existence
     check and is dropped with the file-not-found reason, NOT 'file not in PR
     diff'."""
@@ -118,7 +118,7 @@ def test_empty_hunk_lines_skips_off_hunk_check_and_uses_file_check(repo: Path):
         prior_findings=[],
         repo_root=repo,
         blocking_severities=["critical", "high"],
-        hunk_lines={},
+        hunk_lines=None,
     )
 
     assert updated["findings"] == []
@@ -127,7 +127,7 @@ def test_empty_hunk_lines_skips_off_hunk_check_and_uses_file_check(repo: Path):
     ]
 
 
-def test_empty_hunk_lines_existing_file_in_range_survives(repo: Path):
+def test_missing_hunk_lines_existing_file_in_range_survives(repo: Path):
     """With no hunk info, the off-hunk check is skipped entirely; an in-range
     finding on an existing file survives."""
     findings = [_finding(file="src/foo.py", line=10)]
@@ -138,7 +138,7 @@ def test_empty_hunk_lines_existing_file_in_range_survives(repo: Path):
         prior_findings=[],
         repo_root=repo,
         blocking_severities=["critical", "high"],
-        hunk_lines={},
+        hunk_lines=None,
     )
 
     assert updated["findings"] == findings
@@ -192,7 +192,7 @@ def test_existing_malformed_finding_still_dropped(repo: Path):
         prior_findings=[],
         repo_root=repo,
         blocking_severities=["critical", "high"],
-        hunk_lines={},
+        hunk_lines=None,
     )
 
     assert updated["findings"] == []
@@ -245,3 +245,26 @@ def test_severity_demotion_still_works_with_hunk_lines(repo: Path):
             "reason": "severity-monotonicity (no quoted new evidence)",
         }
     ]
+
+
+def test_empty_hunk_lines_drops_every_finding_as_off_diff(repo: Path):
+    """An EMPTY mapping is not the same statement as a missing one: the
+    diff was read and nothing in it is reviewable, which is what
+    `scope.exclude_paths` covering every changed file produces. Every
+    finding is off-diff by construction. Collapsing the two would let a
+    fully excluded review publish findings on files momus refused to
+    look at.
+    """
+    findings = [_finding(file="src/foo.py", line=1)]
+    doc = _doc(findings)
+
+    updated, actions = preflight(
+        doc,
+        prior_findings=[],
+        repo_root=repo,
+        blocking_severities=["critical", "high"],
+        hunk_lines={},
+    )
+
+    assert updated["findings"] == []
+    assert actions == [{"id": "BOT-A1", "action": "dropped", "reason": "file not in PR diff"}]

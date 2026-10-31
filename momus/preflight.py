@@ -25,15 +25,19 @@ def preflight(
     Apply structural checks to ``findings_doc`` in place semantics.
 
     ``hunk_lines`` maps file path -> set of right-side line numbers that
-    appear in any diff hunk. An empty/None mapping skips the off-hunk
-    check (treated as "no diff info available", not "all lines off-hunk").
+    appear in any diff hunk. ``None`` means the diff could not be read at
+    all and skips the off-hunk check. An EMPTY mapping is a different
+    statement: the diff was read and nothing in it is reviewable, which
+    happens when ``scope.exclude_paths`` covers every changed file. Every
+    finding is then off-diff by construction and is dropped. Collapsing
+    the two would let a fully excluded review publish findings on files
+    momus deliberately refused to look at.
 
     Returns ``(updated_doc, action_log)``.
     """
     actions: list[dict[str, Any]] = []
     surviving: list[dict[str, Any]] = []
     priors_by_id = {p["id"]: p for p in prior_findings}
-    hunk_lines = hunk_lines or {}
 
     for finding in findings_doc.get("findings", []):
         action = _check_one(finding, priors_by_id, repo_root, blocking_severities, hunk_lines)
@@ -62,7 +66,7 @@ def _check_one(
     priors_by_id: dict[str, dict[str, Any]],
     repo_root: Path,
     blocking_severities: list[str],
-    hunk_lines: dict[str, set[int]],
+    hunk_lines: dict[str, set[int]] | None,
 ) -> dict[str, Any] | None:
     fid = finding.get("id", "<unknown>")
     rel = finding.get("file")
@@ -72,8 +76,8 @@ def _check_one(
         return {"id": fid, "action": "dropped", "reason": "missing or malformed file/line"}
 
     # Off-hunk check: cheaper signal than touching the filesystem and gives
-    # a more specific reason. Skipped entirely if no diff info was provided.
-    if hunk_lines:
+    # a more specific reason. Skipped only when the diff is unavailable.
+    if hunk_lines is not None:
         if rel not in hunk_lines:
             return {"id": fid, "action": "dropped", "reason": "file not in PR diff"}
         allowed = hunk_lines[rel]

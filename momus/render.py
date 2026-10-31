@@ -186,6 +186,7 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
 
     return {
         "WORK_DIR": str(work_dir_rel),
+        "SCOPE_EXCLUSIONS": _compose_scope_exclusions(config),
         "REPO_EMPHASIS": _compose_repo_emphasis(review.emphasis_modules, review.repo_emphasis),
         "CALIBRATION_PROCEDURE": calibration_procedure,
         "BLOCKING_SEVERITIES": blocking_str,
@@ -199,6 +200,50 @@ def _substitutions(config: Config, run_id: str, work_dir_rel: Path) -> dict[str,
         "FIRST_REVIEW_APPROVE_RULE": first_review_rule,
         "ID_SCHEME": id_scheme,
     }
+
+
+def _compose_scope_exclusions(config: Config) -> str:
+    """Build the ``<<SCOPE_EXCLUSIONS>>`` substitution body.
+
+    Empty string when nothing is excluded, so a repo running the feature
+    inert sees no instruction at all.
+
+    The instruction names the PATTERNS, never the paths they matched. The
+    patterns come from the repo's own committed ``.momus.yaml``, which
+    the model may read anyway, and there are a handful of them. The
+    matched paths are unbounded (a single `node_modules/` entry can stand
+    for tens of thousands of files), they would crowd out the diff in the
+    context window, and enumerating them hands the model a map of exactly
+    which paths are off-limits.
+    """
+    scope = config.scope
+    patterns = [p for p in scope.exclude_paths if p.strip()]
+    if not patterns and not scope.exclude_binary_files:
+        return ""
+
+    lines = [
+        "## Review scope",
+        "",
+        "Files outside the review scope have been removed from the diff and",
+        "from `changed-files.txt`. The read tools refuse them as well, so a",
+        "read that returns `error: ExcludedPath` is the scope boundary and",
+        "not a bug. Do not work around it, and do not raise findings that",
+        "depend on the contents of an excluded file: such a finding would be",
+        "dropped before it reaches the PR.",
+    ]
+    if patterns:
+        lines += [
+            "",
+            f"Excluded by gitignore-syntax pattern ({len(patterns)} configured):",
+            "",
+        ]
+        lines += [f"- `{p}`" for p in patterns]
+    if scope.exclude_binary_files:
+        lines += [
+            "",
+            "Binary files are excluded from this review.",
+        ]
+    return "\n".join(lines)
 
 
 def _compose_repo_emphasis(modules: list[str], free_form: str) -> str:

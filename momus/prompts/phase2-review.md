@@ -59,6 +59,8 @@ outputs you write go under `<<WORK_DIR>>/outputs/`.
   `wc`, `find`). No commits, no edits, no installs, no network calls
   outside `gh`.
 
+<<SCOPE_EXCLUSIONS>>
+
 ## Repo-specific emphasis
 
 <<REPO_EMPHASIS>>
