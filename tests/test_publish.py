@@ -271,12 +271,15 @@ def test_422_app_cannot_approve_retries_as_comment_with_note():
 
 def test_422_actions_not_permitted_to_approve_retries_as_comment():
     """GitHub Actions default GITHUB_TOKEN error:
-    {"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to approve pull requests."]}
+    {"message":"Unprocessable Entity",
+     "errors":["GitHub Actions is not permitted to approve pull requests."]}
     Must trigger the COMMENT retry with downgrade note.
     """
     err = publish_mod._GhApiError(
         422,
-        'gh: Unprocessable Entity (HTTP 422)\n{"message":"Unprocessable Entity","errors":["GitHub Actions is not permitted to approve pull requests."]}',
+        "gh: Unprocessable Entity (HTTP 422)\n"
+        '{"message":"Unprocessable Entity",'
+        '"errors":["GitHub Actions is not permitted to approve pull requests."]}',
     )
     gh_api = tripwire.mock.object(publish_mod, "_gh_api")
     gh_api.raises(err).returns({})

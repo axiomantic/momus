@@ -6,6 +6,17 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-10-30
+
+### Fixed
+
+- **Recognize GitHub Actions `GITHUB_TOKEN` 422 approval error.** When a
+  workflow's default `GITHUB_TOKEN` attempts to submit an `APPROVE`
+  review and GitHub returns HTTP 422 `"GitHub Actions is not permitted
+  to approve pull requests."`, `_is_app_cannot_approve_error` now
+  matches `"not permitted to approve"` and retries the review as a
+  `COMMENT` with the downgrade note.
+
 ## [1.3.4] - 2026-08-25
 
 ### Fixed
