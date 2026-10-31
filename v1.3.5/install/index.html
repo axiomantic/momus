@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Install Momus</title>
+  <style>
+    :root { color-scheme: light dark; --fg: #0d1117; --bg: #ffffff; --muted: #57606a;
+            --accent: #0969da; --ok: #1a7f37; --bad: #cf222e; --code-bg: #f6f8fa; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg: #e6edf3; --bg: #0d1117; --muted: #8b949e;
+              --code-bg: #161b22; --accent: #2f81f7; }
+    }
+    body { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI",
+                  Helvetica, Arial, sans-serif; max-width: 720px; margin: 2rem auto;
+           padding: 0 1.25rem; color: var(--fg); background: var(--bg); }
+    h1, h2 { line-height: 1.25; }
+    h1 { margin-top: 0; }
+    p, li { color: var(--fg); }
+    .muted { color: var(--muted); }
+    a { color: var(--accent); }
+    button, .button { font: inherit; padding: 0.55rem 1rem; border-radius: 6px;
+                      border: 1px solid var(--accent); background: var(--accent);
+                      color: white; cursor: pointer; text-decoration: none;
+                      display: inline-block; }
+    button.ghost, .button.ghost { background: transparent; color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type="text"] { font: inherit; padding: 0.5rem; border: 1px solid var(--muted);
+                         border-radius: 6px; background: var(--bg); color: var(--fg);
+                         min-width: 14rem; }
+    pre, code { font: 14px/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+                Consolas, "Liberation Mono", monospace; }
+    pre { background: var(--code-bg); padding: 0.85rem 1rem; border-radius: 6px;
+          overflow-x: auto; position: relative; }
+    pre code { background: none; padding: 0; }
+    .copy { position: absolute; top: 0.5rem; right: 0.5rem; padding: 0.25rem 0.6rem;
+            font-size: 12px; }
+    .row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+           margin: 1rem 0; }
+    .step { background: var(--code-bg); border-radius: 8px; padding: 1rem 1.25rem;
+            margin: 1rem 0; }
+    .step h3 { margin-top: 0; }
+    .ok  { color: var(--ok); }
+    .bad { color: var(--bad); }
+    .hidden { display: none; }
+    .small { font-size: 14px; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<h1>Install Momus</h1>
+<p class="muted">
+  Three-step setup: create the GitHub App, save its private key, and run one
+  command per target repo. The bot then posts AI PR reviews with inline
+  comments and an APPROVE / REQUEST_CHANGES verdict.
+</p>
+
+<!-- ============================================================ -->
+<!-- Phase 1: pick scope and launch the GitHub App-manifest flow  -->
+<!-- ============================================================ -->
+<section id="phase-pick">
+  <h2>1. Where will Momus run?</h2>
+  <p>Pick the account that owns the repositories you want reviewed. The
+  GitHub App is created under that account.</p>
+
+  <div class="step">
+    <h3>Personal account</h3>
+    <p>Use this if the repos are owned by your user (e.g. <code>your-name/some-repo</code>).</p>
+    <p class="row">
+      <button id="btn-user">Create App on my user account</button>
+    </p>
+  </div>
+
+  <div class="step">
+    <h3>Organization</h3>
+    <p>Use this if the repos are owned by an org (e.g. <code>my-org/some-repo</code>).
+       You need org-admin permission to create Apps under the org.</p>
+    <p class="row">
+      <label for="org-name" class="small">Organization name</label>
+      <input id="org-name" type="text" placeholder="my-org" autocomplete="off" />
+      <button id="btn-org">Create App under this org</button>
+    </p>
+  </div>
+
+  <p class="muted small">
+    Why two paths? GitHub keeps secrets and Apps separate per account.
+    Personal repos use repo-level secrets; orgs can use either repo-level
+    or org-level (via <code>--org-secrets</code> in the install script).
+  </p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Phase 2: GitHub redirected back with a one-shot ?code=        -->
+<!-- ============================================================ -->
+<section id="phase-converting" class="hidden">
+  <h2>2. Finalizing the App…</h2>
+  <p>Exchanging the one-shot code for the App's credentials.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- Phase 3: success — show App data + install command          -->
+<!-- ============================================================ -->
+<section id="phase-result" class="hidden">
+  <h2>2. App created ✓</h2>
+
+  <div class="step">
+    <h3>App identity</h3>
+    <p><strong>Name:</strong> <code id="app-name"></code></p>
+    <p><strong>App ID:</strong> <code id="app-id"></code></p>
+    <p><strong>Mention handle:</strong> <code id="app-mention"></code>
+       <span class="muted small">(use this in PR comments to re-trigger a review)</span></p>
+  </div>
+
+  <div class="step">
+    <h3>Download the private key</h3>
+    <p>Save this <code>.pem</code> file somewhere safe. Treat it like a password —
+       anyone holding it can act as your App.</p>
+    <p class="row">
+      <button id="btn-download-pem">Download .pem</button>
+      <span class="muted small">Saves to your default downloads folder.</span>
+    </p>
+  </div>
+
+  <div class="step">
+    <h3>Install the App on your repos</h3>
+    <p>Open the install page and select which repos Momus may review.</p>
+    <p class="row">
+      <a id="btn-install-app" class="button" target="_blank" rel="noopener">Open install page</a>
+    </p>
+  </div>
+
+  <h2>3. Configure each repo</h2>
+  <div class="step">
+    <h3>Run the install script</h3>
+    <p>One command per batch of repos. It sets the three secrets and writes
+       <code>.github/workflows/momus.yml</code>. Replace
+       <code>~/Downloads/&hellip;.pem</code> with the path you saved above, and append
+       the <code>owner/repo</code> targets at the end.</p>
+
+    <p><strong>Per-repo secrets (default — works for user repos and any org repo where you have repo admin):</strong></p>
+    <pre><code id="cmd-per-repo"></code><button class="copy ghost" data-copy="cmd-per-repo">copy</button></pre>
+
+    <p><strong>Org-level secrets (one-time, requires <code>admin:org</code> token scope):</strong></p>
+    <pre><code id="cmd-org"></code><button class="copy ghost" data-copy="cmd-org">copy</button></pre>
+
+    <p class="muted small">
+      Don't have <code>install.sh</code> locally?
+      <code>git clone https://github.com/axiomantic/momus.git &amp;&amp; cd momus</code>,
+      then run the command above.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Phase 4: error                                                -->
+<!-- ============================================================ -->
+<section id="phase-error" class="hidden">
+  <h2 class="bad">Something went wrong</h2>
+  <p id="error-detail" class="muted"></p>
+  <p><a href="./">Start over</a></p>
+</section>
+
+<script>
+(() => {
+  // ---------- config ----------------------------------------------------------
+
+  // The reusable workflow lives at <REUSABLE_OWNER>/.github/.github/workflows/
+  // momus.yml. For users installing the public Momus, the canonical location
+  // is `axiomantic/.github`. Forks should change this constant.
+  const REUSABLE_OWNER = "axiomantic";
+
+  // The redirect target must match the URL of THIS page. Set absolutely so
+  // the manifest works whether the page is served from GitHub Pages root,
+  // a sub-path, or a fork.
+  const REDIRECT_URL = window.location.origin + window.location.pathname;
+
+  // App-manifest payload.  See:
+  // https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+  function buildManifest() {
+    return {
+      name: "Momus",
+      url: "https://github.com/axiomantic/momus",
+      redirect_url: REDIRECT_URL,
+      // Webhooks not used: events come through GitHub Actions, not webhooks.
+      // GitHub still requires hook_attributes; mark inactive.
+      hook_attributes: { url: "https://example.com/unused", active: false },
+      public: false,
+      default_events: [],
+      default_permissions: {
+        contents: "read",
+        issues: "write",
+        pull_requests: "write",
+        actions: "read",
+        checks: "write",
+        metadata: "read",
+      },
+    };
+  }
+
+  // ---------- DOM helpers -----------------------------------------------------
+
+  const $ = (id) => document.getElementById(id);
+  const show = (id) => $(id).classList.remove("hidden");
+  const hide = (id) => $(id).classList.add("hidden");
+
+  function showOnly(id) {
+    for (const sec of ["phase-pick", "phase-converting", "phase-result", "phase-error"]) {
+      sec === id ? show(sec) : hide(sec);
+    }
+  }
+
+  function failWith(msg) {
+    $("error-detail").textContent = msg;
+    showOnly("phase-error");
+  }
+
+  // ---------- phase 1: launch manifest flow ----------------------------------
+
+  function postManifest(targetUrl, state) {
+    // GitHub's manifest endpoint expects a POST form with `manifest` (JSON
+    // string) and optional `state`. Build a hidden form and submit it.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = targetUrl;
+    const m = document.createElement("input");
+    m.name = "manifest";
+    m.value = JSON.stringify(buildManifest());
+    form.appendChild(m);
+    if (state) {
+      const s = document.createElement("input");
+      s.name = "state";
+      s.value = state;
+      form.appendChild(s);
+    }
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  $("btn-user").addEventListener("click", () => {
+    postManifest("https://github.com/settings/apps/new", "user");
+  });
+
+  $("btn-org").addEventListener("click", () => {
+    const org = $("org-name").value.trim();
+    if (!org) {
+      $("org-name").focus();
+      return;
+    }
+    postManifest(
+      `https://github.com/organizations/${encodeURIComponent(org)}/settings/apps/new`,
+      `org:${org}`
+    );
+  });
+
+  // ---------- phase 2: handle redirect ?code=&state= -------------------------
+
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const state = params.get("state") || "";
+
+  if (!code) {
+    showOnly("phase-pick");
+    return;
+  }
+
+  showOnly("phase-converting");
+
+  // The conversions endpoint is one-shot and unauthenticated — the `code`
+  // itself authenticates the request.
+  fetch(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`, {
+    method: "POST",
+    headers: { Accept: "application/vnd.github+json" },
+  })
+    .then((r) => r.json().then((j) => ({ ok: r.ok, body: j })))
+    .then(({ ok, body }) => {
+      if (!ok) {
+        failWith(body.message || "GitHub rejected the manifest exchange.");
+        return;
+      }
+      renderResult(body, state);
+    })
+    .catch((e) => failWith("Network error: " + (e.message || e)));
+
+  // ---------- phase 3: render App data + install commands --------------------
+
+  function renderResult(app, state) {
+    // `app` shape per GitHub docs:
+    //   { id, slug, name, owner, html_url, pem, webhook_secret,
+    //     client_id, client_secret, ... }
+    const slug = app.slug;
+    const mention = `@${slug}[bot]`;
+
+    $("app-name").textContent = app.name;
+    $("app-id").textContent = String(app.id);
+    $("app-mention").textContent = mention;
+
+    // Save the .pem so the user can download it on demand.
+    const pemBlob = new Blob([app.pem], { type: "application/x-pem-file" });
+    const pemUrl = URL.createObjectURL(pemBlob);
+    $("btn-download-pem").addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.href = pemUrl;
+      a.download = `${slug}.private-key.pem`;
+      a.click();
+    });
+
+    $("btn-install-app").href =
+      `https://github.com/apps/${encodeURIComponent(slug)}/installations/new`;
+
+    // Build the copy-paste commands. Single-quoted to avoid shell expansion
+    // on the App ID and mention; the user fills in the .pem path and the
+    // owner/repo list at the end.
+    const common =
+      `./scripts/install.sh \\\n` +
+      `  --app-id ${app.id} \\\n` +
+      `  --pem ~/Downloads/${slug}.private-key.pem \\\n` +
+      `  --llm-key-file ~/.config/momus/llm-key \\\n` +
+      `  --reusable-owner ${REUSABLE_OWNER} \\\n` +
+      `  --trigger-mention '${mention}' \\\n` +
+      `  owner/repo [owner/repo ...]`;
+
+    $("cmd-per-repo").textContent = common;
+
+    // Org variant adds the --org-secrets flag. Pre-fill the org name only
+    // when we know it from the state parameter.
+    let orgName = "your-org";
+    if (state.startsWith("org:")) orgName = state.slice("org:".length) || orgName;
+    $("cmd-org").textContent =
+      `./scripts/install.sh \\\n` +
+      `  --app-id ${app.id} \\\n` +
+      `  --pem ~/Downloads/${slug}.private-key.pem \\\n` +
+      `  --llm-key-file ~/.config/momus/llm-key \\\n` +
+      `  --reusable-owner ${REUSABLE_OWNER} \\\n` +
+      `  --trigger-mention '${mention}' \\\n` +
+      `  --org-secrets ${orgName} \\\n` +
+      `  ${orgName}/repo [${orgName}/repo ...]`;
+
+    showOnly("phase-result");
+  }
+
+  // ---------- copy buttons ---------------------------------------------------
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-copy]");
+    if (!btn) return;
+    const text = $(btn.dataset.copy).textContent;
+    navigator.clipboard.writeText(text).then(
+      () => {
+        const old = btn.textContent;
+        btn.textContent = "copied";
+        setTimeout(() => (btn.textContent = old), 1200);
+      },
+      () => (btn.textContent = "copy failed")
+    );
+  });
+})();
+</script>
+</body>
+</html>
