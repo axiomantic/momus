@@ -850,6 +850,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#token-scope-exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;SCOPE_EXCLUSIONS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#token-repo-emphasis" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1448,6 +1459,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#token-scope-exclusions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        &lt;&lt;SCOPE_EXCLUSIONS&gt;&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#token-repo-emphasis" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1627,6 +1649,15 @@
 <p>becomes:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Read .momus/inputs/diff.patch
 </code></pre></div>
+<h2 id="token-scope-exclusions"><code>&lt;&lt;SCOPE_EXCLUSIONS&gt;&gt;</code><a class="headerlink" href="#token-scope-exclusions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Substituted from: <a href="../config-schema/#scope-exclude-paths"><code>scope.exclude_paths</code></a> + <a href="../config-schema/#scope-exclude-binary-files"><code>scope.exclude_binary_files</code></a>, composed by <code>_compose_scope_exclusions</code> in <code>momus/render.py</code>.</li>
+<li>Used by: phase2, phase3.</li>
+<li>Available since 1.4.0.</li>
+</ul>
+<p>A "Review scope" section telling the model that out-of-scope files are absent from the diff, that the read tools answer <code>error: ExcludedPath</code> for them, and that a finding depending on an excluded file would be dropped before it reaches the PR. Empty string when nothing is excluded, so a repo running the feature inert sees no instruction.</p>
+<p>Phase 1 does not use the token: it runs with <code>--tools ["write_output"]</code> and has no file tools to constrain.</p>
+<p>The section names the configured PATTERNS, never the paths they matched. The patterns come from the repo's own committed <code>.momus.yaml</code> and there are a handful of them; the matched paths are unbounded (one <code>node_modules/</code> entry can stand for tens of thousands of files), would crowd the diff out of the context window, and would hand the model a map of exactly which paths are off-limits.</p>
 <h2 id="token-repo-emphasis"><code>&lt;&lt;REPO_EMPHASIS&gt;&gt;</code><a class="headerlink" href="#token-repo-emphasis" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Substituted from: <a href="../config-schema/#review-emphasis-modules"><code>review.emphasis_modules</code></a> + <a href="../config-schema/#review-repo-emphasis"><code>review.repo_emphasis</code></a>, composed by <code>_compose_repo_emphasis</code> (<code>momus/render.py</code> lines 204-223).</li>

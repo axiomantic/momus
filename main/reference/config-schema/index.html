@@ -916,6 +916,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope-exclude-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope.exclude_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-exclude-binary-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope.exclude_binary_files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#conventions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1677,6 +1716,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope-exclude-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope.exclude_paths
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-exclude-binary-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scope.exclude_binary_files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#conventions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1882,7 +1960,7 @@
 
 <h1 id="configuration-schema">Configuration schema<a class="headerlink" href="#configuration-schema" title="Permanent link">&para;</a></h1>
 <p>Every key Momus reads from <code>.momus.yaml</code>. Defaults live in <code>momus/config-defaults.yaml</code>; a target repo overrides any key by committing <code>.momus.yaml</code> at its repo root. Anything unset falls back to defaults. Unrecognized keys are an error: typos fail loudly rather than silently dropping intent.</p>
-<p>Top-level groups: <a href="#review"><code>review</code></a>, <a href="#conventions"><code>conventions</code></a>, <a href="#post"><code>post</code></a>, <a href="#verify"><code>verify</code></a>, <a href="#checks"><code>checks</code></a>, <a href="#provider"><code>provider</code></a>.</p>
+<p>Top-level groups: <a href="#review"><code>review</code></a>, <a href="#scope"><code>scope</code></a>, <a href="#conventions"><code>conventions</code></a>, <a href="#post"><code>post</code></a>, <a href="#verify"><code>verify</code></a>, <a href="#checks"><code>checks</code></a>, <a href="#provider"><code>provider</code></a>.</p>
 <h2 id="review">review<a class="headerlink" href="#review" title="Permanent link">&para;</a></h2>
 <p>Findings cap, severity scale, calibration, and emphasis injection.</p>
 <h3 id="review-blocking-severities"><code>review.blocking_severities</code><a class="headerlink" href="#review-blocking-severities" title="Permanent link">&para;</a></h3>
@@ -1963,6 +2041,65 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">repo_emphasis</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="no">Treat any panic/unwrap in firmware code as critical.</span>
 </code></pre></div>
+<h2 id="scope">scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>Which changed files the review looks at. Where <a href="#review"><code>review</code></a> governs the findings momus emits, <code>scope</code> governs the diff it reads in the first place.</p>
+<h3 id="scope-exclude-paths"><code>scope.exclude_paths</code><a class="headerlink" href="#scope-exclude-paths" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Type: <code>list[str]</code> (gitignore-syntax patterns)</li>
+<li>Default: the list below</li>
+<li>Available since 1.4.0</li>
+</ul>
+<p>Files matching any pattern are removed from <code>inputs/diff.patch</code> and from <code>inputs/changed-files.txt</code>, and the LLM tool layer (<code>read_repo</code>, <code>grep_repo</code>, <code>find_repo</code>, <code>ls_repo</code>, <code>bash_ro</code>) refuses them.</p>
+<p><strong>Setting this key REPLACES the default list. It does not extend it.</strong> A repo that wants the defaults plus one more entry restates the whole list. This is the ordinary YAML list-override behavior and it is deliberate: an exclusion list you cannot shrink is not an exclusion list you control.</p>
+<p>The defaults, verbatim and copy-pasteable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">scope</span><span class="p">:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">exclude_paths</span><span class="p">:</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dist/</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">build/</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">node_modules/</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vendor/</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">coverage/</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;*.min.js&quot;</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;*.min.css&quot;</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;*.map&quot;</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">package-lock.json</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">yarn.lock</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pnpm-lock.yaml</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uv.lock</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">poetry.lock</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Gemfile.lock</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer.lock</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Cargo.lock</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">go.sum</span>
+</code></pre></div>
+<p>They cover generated, minified, and vendored output whose content is decided by a source file that IS reviewed. Test snapshots and golden files are deliberately absent: they are often the most informative part of a diff.</p>
+<p>Full gitignore semantics apply:</p>
+<ul>
+<li><code>!pattern</code> re-includes a previously excluded path.</li>
+<li>A leading <code>/</code> anchors the pattern to the repo root.</li>
+<li>A trailing <code>/</code> matches directories only.</li>
+<li><code>**</code> spans directory boundaries.</li>
+<li>Order matters: the last matching pattern decides.</li>
+<li>As in gitignore, a file under a directory this list excludes cannot be re-included by a later <code>!</code> line. Use <code>dist/**</code> rather than <code>dist/</code> when you intend to re-include something beneath it.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">scope</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">exclude_paths</span><span class="p">:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dist/**</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;!dist/manifest.json&quot;</span><span class="w">   </span><span class="c1"># reviewed, even though the rest of dist/ is not</span>
+</code></pre></div>
+<p>Character classes behave as they do in gitignore, negated forms included: <code>*.[oa]</code>, <code>file[0-9].txt</code>, <code>[!a]bc</code> and <code>src/[^x]*.py</code> all give the verdict <code>git check-ignore</code> gives.</p>
+<p>POSIX bracket expressions (<code>[[:digit:]]</code>, <code>[[:alpha:]]</code>) are rejected with an error. Momus matches gitignore patterns twice, in Python for the diff and in TypeScript for the tool layer, and that one construct is read differently by each, with neither reading matching git. A pattern the two layers disagree about would remove a file from the diff while leaving it readable, so momus refuses it instead. Write the range out (<code>[0-9]</code>, <code>[a-zA-Z]</code>).</p>
+<p>Set to <code>[]</code> to review everything.</p>
+<p>Note: an unrecognized key inside <code>scope</code> is currently accepted silently rather than raising, so a typo such as <code>exclude_path</code> leaves the defaults in force and reviews everything the defaults do not cover. Check <code>inputs/changed-files.txt</code> on the first run after editing this key.</p>
+<h3 id="scope-exclude-binary-files"><code>scope.exclude_binary_files</code><a class="headerlink" href="#scope-exclude-binary-files" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Type: <code>bool</code></li>
+<li>Default: <code>false</code></li>
+<li>Available since 1.4.0</li>
+</ul>
+<p>Whether to drop binary files from the review diff. Git renders a binary change as a three-line <code>Binary files ... differ</code> stanza with no hunk. The model cannot review it, any finding on it would be dropped as off-hunk, and it still counts toward the per-phase cap estimate. Detection is lexical, from the diff momus already captured: a <code>diff --git</code> stanza carrying a binary marker and no <code>@@</code> header.</p>
+<p>Off by default, because a repo that reviews binary assets deliberately should keep seeing that they changed.</p>
+<p>Both keys feed the <a href="../prompt-tokens/#token-scope-exclusions"><code>&lt;&lt;SCOPE_EXCLUSIONS&gt;&gt;</code></a> prompt token.</p>
 <h2 id="conventions">conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
 <p>Files concatenated into <code>inputs/conventions.md</code> and presented to the model as repo conventions that override prompt defaults.</p>
 <h3 id="conventions-files"><code>conventions.files</code><a class="headerlink" href="#conventions-files" title="Permanent link">&para;</a></h3>
@@ -2035,8 +2172,8 @@
 <li>Available since 1.0</li>
 </ul>
 <p>LLM model slug. Empty string means "use whatever the workflow set in <code>LLM_MODEL</code>." Override here when this repo needs a different model than the workflow default. The slug must be one your provider/<code>base_url</code> accepts.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">provider</span><span class="p">:</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-sonnet-4-6</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">provider</span><span class="p">:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-sonnet-4-6</span>
 </code></pre></div>
 <h3 id="provider-base-url"><code>provider.base_url</code><a class="headerlink" href="#provider-base-url" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2045,8 +2182,8 @@
 <li>Available since 1.0</li>
 </ul>
 <p>API base URL. Empty string means "use whatever the workflow set in <code>LLM_BASE_URL</code>." Override here for a different endpoint. The matching API key still comes from the <code>LLM_API_KEY</code> secret on the workflow job.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">provider</span><span class="p">:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://api.anthropic.com/v1</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">provider</span><span class="p">:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">base_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://api.anthropic.com/v1</span>
 </code></pre></div>
 
 
