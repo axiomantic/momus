@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .diff_filter import DiffFilter
 from .render import render_phase_prompt
 
 
@@ -34,8 +35,22 @@ def prep_inputs(
     base_sha = pr_meta["base_sha"]
     head_sha = pr_meta["head_sha"]
 
-    _write_diff(repo_root, base_sha, head_sha, inputs_dir / "diff.patch")
-    _write_changed_files(repo_root, base_sha, head_sha, inputs_dir / "changed-files.txt")
+    # One filter, applied at both write sites. diff.patch and
+    # changed-files.txt describe the same review scope; building the
+    # predicate twice is how they would come to disagree.
+    diff_filter = DiffFilter(
+        patterns=tuple(config.scope.exclude_paths),
+        exclude_binary=config.scope.exclude_binary_files,
+    )
+    dropped = _write_diff(repo_root, base_sha, head_sha, inputs_dir / "diff.patch", diff_filter)
+    _write_changed_files(
+        repo_root,
+        base_sha,
+        head_sha,
+        inputs_dir / "changed-files.txt",
+        diff_filter,
+        dropped,
+    )
     _write_conventions(repo_root, config, inputs_dir / "conventions.md")
     (inputs_dir / "pr-meta.json").write_text(json.dumps(pr_meta, indent=2))
 
@@ -54,7 +69,19 @@ def prep_inputs(
     return inputs_dir
 
 
-def _write_diff(repo_root: Path, base: str, head: str, dest: Path) -> None:
+def _write_diff(
+    repo_root: Path,
+    base: str,
+    head: str,
+    dest: Path,
+    diff_filter: DiffFilter | None = None,
+) -> frozenset[str]:
+    """Write the review patch; return the paths the filter dropped.
+
+    The returned set is what ``_write_changed_files`` needs to reach the
+    same verdict on binary files, which it cannot derive from
+    ``--name-only`` output on its own.
+    """
     proc = subprocess.run(
         ["git", "diff", "--no-color", f"{base}...{head}"],
         capture_output=True,
@@ -62,10 +89,22 @@ def _write_diff(repo_root: Path, base: str, head: str, dest: Path) -> None:
         check=True,
         cwd=repo_root,
     )
-    dest.write_text(proc.stdout)
+    if diff_filter is None:
+        dest.write_text(proc.stdout)
+        return frozenset()
+    patch, dropped = diff_filter.filter_patch(proc.stdout)
+    dest.write_text(patch)
+    return dropped
 
 
-def _write_changed_files(repo_root: Path, base: str, head: str, dest: Path) -> None:
+def _write_changed_files(
+    repo_root: Path,
+    base: str,
+    head: str,
+    dest: Path,
+    diff_filter: DiffFilter | None = None,
+    dropped: frozenset[str] = frozenset(),
+) -> None:
     proc = subprocess.run(
         ["git", "diff", "--name-only", f"{base}...{head}"],
         capture_output=True,
@@ -73,7 +112,10 @@ def _write_changed_files(repo_root: Path, base: str, head: str, dest: Path) -> N
         check=True,
         cwd=repo_root,
     )
-    dest.write_text(proc.stdout)
+    if diff_filter is None:
+        dest.write_text(proc.stdout)
+        return
+    dest.write_text(diff_filter.filter_changed_files(proc.stdout, dropped))
 
 
 def _write_conventions(repo_root: Path, config: Config, dest: Path) -> None:

@@ -26,6 +26,18 @@ becomes:
 Read .momus/inputs/diff.patch
 ```
 
+## `<<SCOPE_EXCLUSIONS>>` {#token-scope-exclusions}
+
+- Substituted from: [`scope.exclude_paths`](./config-schema.md#scope-exclude-paths) + [`scope.exclude_binary_files`](./config-schema.md#scope-exclude-binary-files), composed by `_compose_scope_exclusions` in `momus/render.py`.
+- Used by: phase2, phase3.
+- Available since 1.4.0.
+
+A "Review scope" section telling the model that out-of-scope files are absent from the diff, that the read tools answer `error: ExcludedPath` for them, and that a finding depending on an excluded file would be dropped before it reaches the PR. Empty string when nothing is excluded, so a repo running the feature inert sees no instruction.
+
+Phase 1 does not use the token: it runs with `--tools ["write_output"]` and has no file tools to constrain.
+
+The section names the configured PATTERNS, never the paths they matched. The patterns come from the repo's own committed `.momus.yaml` and there are a handful of them; the matched paths are unbounded (one `node_modules/` entry can stand for tens of thousands of files), would crowd the diff out of the context window, and would hand the model a map of exactly which paths are off-limits.
+
 ## `<<REPO_EMPHASIS>>` {#token-repo-emphasis}
 
 - Substituted from: [`review.emphasis_modules`](./config-schema.md#review-emphasis-modules) + [`review.repo_emphasis`](./config-schema.md#review-repo-emphasis), composed by `_compose_repo_emphasis` (`momus/render.py` lines 204-223).
